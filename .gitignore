@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.log
+.pytest_cache/
+.idea/
+.ipynb_checkpoints/
+data/
+.claude/settings.local.json

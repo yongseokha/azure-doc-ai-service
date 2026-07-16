@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.idea/
+.claude/
+notebooks/
+data/
+*.ipynb
+.env
+.env.example
+README.md
+.pytest_cache/
