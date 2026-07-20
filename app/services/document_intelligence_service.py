@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult, DocumentContentFormat
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import HttpResponseError
@@ -19,21 +19,28 @@ def get_document_intelligence_client() -> DocumentIntelligenceClient:
     )
 
 
-def analyze_document(content: bytes, model_id: str = DEFAULT_MODEL_ID) -> AnalyzeResult:
+async def close() -> None:
+    if get_document_intelligence_client.cache_info().currsize == 0:
+        return
+    await get_document_intelligence_client().close()
+    get_document_intelligence_client.cache_clear()
+
+
+async def analyze_document(content: bytes, model_id: str = DEFAULT_MODEL_ID) -> AnalyzeResult:
     client = get_document_intelligence_client()
 
     try:
-        poller = client.begin_analyze_document(
+        poller = await client.begin_analyze_document(
             model_id,
             body=content,
             content_type="application/octet-stream",
             output_content_format=DocumentContentFormat.MARKDOWN,
         )
-        return poller.result()
+        return await poller.result()
     except HttpResponseError as exc:
         raise DocumentIntelligenceError(str(exc)) from exc
 
 
-def extract_markdown(content: bytes, model_id: str = DEFAULT_MODEL_ID) -> str:
-    result = analyze_document(content, model_id=model_id)
+async def extract_markdown(content: bytes, model_id: str = DEFAULT_MODEL_ID) -> str:
+    result = await analyze_document(content, model_id=model_id)
     return result.content or ""

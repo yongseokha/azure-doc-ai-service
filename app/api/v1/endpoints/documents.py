@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Form, UploadFile
 
 from app.exceptions.handlers import FileTooLargeError
@@ -18,7 +20,7 @@ async def _read_and_validate(file: UploadFile) -> bytes:
 @router.post("/parse", response_model=ParsedDocument)
 async def parse_document(file: UploadFile) -> ParsedDocument:
     content = await _read_and_validate(file)
-    text = document_parser_service.parse_document(file.filename, content)
+    text = await asyncio.to_thread(document_parser_service.parse_document, file.filename, content)
 
     return ParsedDocument(filename=file.filename, content=text, char_count=len(text))
 
@@ -26,7 +28,7 @@ async def parse_document(file: UploadFile) -> ParsedDocument:
 @router.post("/parse-di", response_model=ParsedDocument)
 async def parse_document_with_document_intelligence(file: UploadFile) -> ParsedDocument:
     content = await _read_and_validate(file)
-    text = document_intelligence_service.extract_markdown(content)
+    text = await document_intelligence_service.extract_markdown(content)
 
     return ParsedDocument(filename=file.filename, content=text, char_count=len(text))
 
@@ -38,9 +40,9 @@ async def summarize_document(
     max_output_tokens: int = Form(default=800),
 ) -> SummarizeResult:
     content = await _read_and_validate(file)
-    text = document_parser_service.parse_document(file.filename, content)
+    text = await asyncio.to_thread(document_parser_service.parse_document, file.filename, content)
 
-    summary = azure_openai_service.summarize_text(
+    summary = await azure_openai_service.summarize_text(
         text=text,
         instruction=instruction,
         max_output_tokens=max_output_tokens,
