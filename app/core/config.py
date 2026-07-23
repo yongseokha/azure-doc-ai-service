@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     azure_document_intelligence_endpoint: str
     azure_document_intelligence_api_key: str
 
+    azure_search_endpoint: str
+    azure_search_api_key: str
+    azure_search_index_name: str = "ocr-documents"
+
+    azure_file_storage_connection_string: str
+    azure_file_share_name: str = "ocr-archive"
+
     max_upload_size_mb: int = 20
 
     @property
