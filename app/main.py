@@ -5,17 +5,14 @@ from fastapi import FastAPI
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.exceptions.handlers import AppException, app_exception_handler
-from app.services import azure_openai_service, blob_storage_service, document_intelligence_service
+from app.services import document_intelligence_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        await blob_storage_service.ensure_container_exists()
         yield
     finally:
-        await blob_storage_service.close()
-        await azure_openai_service.close()
         await document_intelligence_service.close()
 
 
