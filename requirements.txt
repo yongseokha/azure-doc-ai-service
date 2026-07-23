@@ -5,3 +5,4 @@ pydantic-settings==2.7.1
 python-multipart==0.0.20
 azure-ai-documentintelligence==1.0.2
 azure-storage-file-share==12.26.0
+azure-search-documents==11.5.2
