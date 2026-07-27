@@ -23,5 +23,10 @@ class FileStorageError(AppException):
         super().__init__(f"File Storage 처리 중 오류가 발생했습니다: {detail}", status_code=502)
 
 
+class SearchIndexError(AppException):
+    def __init__(self, detail: str):
+        super().__init__(f"AI Search 인덱스 처리 중 오류가 발생했습니다: {detail}", status_code=502)
+
+
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
