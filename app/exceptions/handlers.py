@@ -13,6 +13,11 @@ class FileTooLargeError(AppException):
         super().__init__(f"파일 크기가 {max_size_mb}MB를 초과했습니다.", status_code=413)
 
 
+class InvalidRequestError(AppException):
+    def __init__(self, detail: str):
+        super().__init__(detail, status_code=400)
+
+
 class DocumentIntelligenceError(AppException):
     def __init__(self, detail: str):
         super().__init__(f"Document Intelligence 호출 중 오류가 발생했습니다: {detail}", status_code=502)
