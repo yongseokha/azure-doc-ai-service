@@ -1,5 +1,8 @@
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+from app.core.config import settings
 
 
 class AppException(Exception):
@@ -38,5 +41,18 @@ class StillProcessingError(AppException):
         super().__init__("문서가 아직 처리 중입니다. 잠시 후 다시 시도해주세요.", status_code=202)
 
 
+def _envelope(status_code: int, status_msg: str) -> dict:
+    return {"statusCode": status_code, "statusMsg": status_msg, "result": None}
+
+
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+    return JSONResponse(status_code=exc.status_code, content=_envelope(exc.status_code, exc.message))
+
+
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(status_code=422, content=_envelope(422, "요청 값이 올바르지 않습니다."))
+
+
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    message = str(exc) if settings.debug else "서버 내부 오류가 발생했습니다."
+    return JSONResponse(status_code=500, content=_envelope(500, message))
