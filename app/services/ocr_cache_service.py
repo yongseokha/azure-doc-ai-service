@@ -18,13 +18,16 @@ def _build_cache_key(content_hash: str) -> str:
     return f"{content_hash}_{DEFAULT_MODEL_ID}_{OUTPUT_FORMAT}"
 
 
+CACHE_ROOT = "cache"
+
+
 def _build_original_path(content_hash: str, filename: str) -> str:
     extension = Path(filename).suffix
-    return f"{content_hash[:2]}/{content_hash}/original{extension}"
+    return f"{CACHE_ROOT}/{content_hash[:2]}/{content_hash}/original{extension}"
 
 
 def _build_result_path(content_hash: str) -> str:
-    return f"{content_hash[:2]}/{content_hash}/result.md"
+    return f"{CACHE_ROOT}/{content_hash[:2]}/{content_hash}/result.md"
 
 
 def _now_iso() -> str:
