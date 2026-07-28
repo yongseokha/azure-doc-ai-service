@@ -39,8 +39,3 @@ async def analyze_document(content: bytes, model_id: str = DEFAULT_MODEL_ID) -> 
         return await poller.result()
     except HttpResponseError as exc:
         raise DocumentIntelligenceError(str(exc)) from exc
-
-
-async def extract_markdown(content: bytes, model_id: str = DEFAULT_MODEL_ID) -> str:
-    result = await analyze_document(content, model_id=model_id)
-    return result.content or ""

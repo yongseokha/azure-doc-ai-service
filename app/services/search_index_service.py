@@ -52,6 +52,7 @@ def _build_index() -> SearchIndex:
             SimpleField(name="original_file_path", type=SearchFieldDataType.String),
             SimpleField(name="result_file_path", type=SearchFieldDataType.String),
             SimpleField(name="char_count", type=SearchFieldDataType.Int32),
+            SimpleField(name="page_count", type=SearchFieldDataType.Int32),
             SimpleField(name="error_message", type=SearchFieldDataType.String),
             SimpleField(name="hit_count", type=SearchFieldDataType.Int32),
             SimpleField(name="created_at", type=SearchFieldDataType.DateTimeOffset, filterable=True),

@@ -104,7 +104,9 @@ async def _process(
         if existing_file_path is None:
             await file_storage_service.upload_file(original_path, content)
 
-        text = await document_intelligence_service.extract_markdown(content, model_id=DEFAULT_MODEL_ID)
+        result = await document_intelligence_service.analyze_document(content, model_id=DEFAULT_MODEL_ID)
+        text = result.content or ""
+        page_count = len(result.pages or [])
         await file_storage_service.upload_file(result_path, text.encode("utf-8"))
 
         await search_index_service.merge_or_upload_document(
@@ -114,6 +116,7 @@ async def _process(
                 "original_file_path": original_path,
                 "result_file_path": result_path,
                 "char_count": len(text),
+                "page_count": page_count,
                 "updated_at": _now_iso(),
             }
         )
@@ -123,7 +126,13 @@ async def _process(
         )
         raise
 
-    return ParsedDocument(char_count=len(text), cache_hit=False, document_hash=content_hash, result_file_path=result_path)
+    return ParsedDocument(
+        char_count=len(text),
+        page_count=page_count,
+        cache_hit=False,
+        document_hash=content_hash,
+        result_file_path=result_path,
+    )
 
 
 async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:
@@ -138,6 +147,7 @@ async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:
 
     return ParsedDocument(
         char_count=doc["char_count"],
+        page_count=doc["page_count"],
         cache_hit=True,
         document_hash=doc["content_hash"],
         result_file_path=doc["result_file_path"],
