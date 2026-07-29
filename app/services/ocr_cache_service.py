@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -28,6 +29,10 @@ def _build_original_path(content_hash: str, filename: str) -> str:
 
 def _build_result_path(content_hash: str) -> str:
     return f"{CACHE_ROOT}/{content_hash[:2]}/{content_hash}/result.md"
+
+
+def _build_result_json_path(content_hash: str) -> str:
+    return f"{CACHE_ROOT}/{content_hash[:2]}/{content_hash}/result.json"
 
 
 def _now_iso() -> str:
@@ -102,6 +107,7 @@ async def _process(
 ) -> ParsedDocument:
     original_path = existing_file_path or _build_original_path(content_hash, filename)
     result_path = _build_result_path(content_hash)
+    result_json_path = _build_result_json_path(content_hash)
 
     try:
         if existing_file_path is None:
@@ -110,7 +116,10 @@ async def _process(
         result = await document_intelligence_service.analyze_document(content, model_id=DEFAULT_MODEL_ID)
         text = result.content or ""
         page_count = len(result.pages or [])
+        result_json = json.dumps(result.as_dict(), ensure_ascii=False)
+
         await file_storage_service.upload_file(result_path, text.encode("utf-8"))
+        await file_storage_service.upload_file(result_json_path, result_json.encode("utf-8"))
 
         await search_index_service.merge_or_upload_document(
             {
@@ -118,6 +127,7 @@ async def _process(
                 "status": "completed",
                 "original_file_path": original_path,
                 "result_file_path": result_path,
+                "result_json_path": result_json_path,
                 "char_count": len(text),
                 "page_count": page_count,
                 "updated_at": _now_iso(),
@@ -133,6 +143,7 @@ async def _process(
         cache_hit=False,
         document_hash=content_hash,
         result_file_path=result_path,
+        result_json_path=result_json_path,
     )
 
 
@@ -150,6 +161,7 @@ async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:
         cache_hit=True,
         document_hash=doc["content_hash"],
         result_file_path=doc["result_file_path"],
+        result_json_path=doc["result_json_path"],
     )
 
 

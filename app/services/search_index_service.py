@@ -51,6 +51,7 @@ def _build_index() -> SearchIndex:
             SimpleField(name="size_bytes", type=SearchFieldDataType.Int64),
             SimpleField(name="original_file_path", type=SearchFieldDataType.String),
             SimpleField(name="result_file_path", type=SearchFieldDataType.String),
+            SimpleField(name="result_json_path", type=SearchFieldDataType.String),
             SimpleField(name="char_count", type=SearchFieldDataType.Int32),
             SimpleField(name="page_count", type=SearchFieldDataType.Int32),
             SimpleField(name="error_message", type=SearchFieldDataType.String),
