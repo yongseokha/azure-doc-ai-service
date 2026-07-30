@@ -36,12 +36,16 @@ async def _resolve_content(
     summary="문서 OCR 처리 (캐시 지원)",
 )
 async def parse_document_with_document_intelligence(
-    userId: str = Form(default="", description="사용자 사번"),
-    infId: str = Form(default="", description="인터페이스 ID (API별 고정값)"),
-    rqtKey: str = Form(default="", description="요청키 (클라이언트 생성 랜덤 키)"),
+    userId: str = Form(default="", description="사용자 사번", examples=["12345"]),
+    infId: str = Form(default="", description="인터페이스 ID (API별 고정값)", examples=["DOC_PARSE_DI_V1"]),
+    rqtKey: str = Form(
+        default="", description="요청키 (클라이언트 생성 랜덤 키)", examples=["k3n9X2b7QsT1m8pZ..."]
+    ),
     file: UploadFile | None = File(default=None, description="업로드할 문서 파일 (PDF, DOCX 등)"),
     filePath: str | None = Form(
-        default=None, description="Azure File Storage 내 기존 파일 경로 (file과 동시 사용 불가)"
+        default=None,
+        description="Azure File Storage 내 기존 파일 경로 (file과 동시 사용 불가)",
+        examples=["uploads/2026-07/계약서.pdf"],
     ),
 ) -> ApiResponse[ParsedDocument]:
     """
