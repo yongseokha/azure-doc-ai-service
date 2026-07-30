@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -11,8 +10,6 @@ from app.services.document_intelligence_service import DEFAULT_MODEL_ID
 
 OUTPUT_FORMAT = "markdown"
 STALE_PROCESSING_THRESHOLD = timedelta(hours=1)
-POLL_INTERVAL_SECONDS = 0.5
-POLL_TIMEOUT_SECONDS = 30
 
 
 def _build_cache_key(content_hash: str) -> str:
@@ -60,7 +57,7 @@ async def get_or_process(
         return await _serve_cached(doc, filename)
 
     if doc is not None and doc["status"] == "processing" and not _is_stale(doc["updated_at"]):
-        return await _poll(cache_key, content_hash, filename, content, content_type, existing_file_path)
+        raise StillProcessingError()
 
     if doc is None:
         await _claim_new(cache_key, content_hash, filename, content_type, len(content))
@@ -164,32 +161,3 @@ async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:
         result_file_path=doc["result_file_path"],
         result_json_path=doc["result_json_path"],
     )
-
-
-async def _poll(
-    cache_key: str,
-    content_hash: str,
-    filename: str,
-    content: bytes,
-    content_type: str | None,
-    existing_file_path: str | None,
-) -> ParsedDocument:
-    elapsed = 0.0
-    while elapsed < POLL_TIMEOUT_SECONDS:
-        await asyncio.sleep(POLL_INTERVAL_SECONDS)
-        elapsed += POLL_INTERVAL_SECONDS
-
-        doc = await search_index_service.get_document(cache_key)
-
-        if doc is None:
-            await _claim_new(cache_key, content_hash, filename, content_type, len(content))
-            return await _process(cache_key, content_hash, filename, content, existing_file_path)
-
-        if doc["status"] == "completed":
-            return await _serve_cached(doc, filename)
-
-        if doc["status"] == "failed" or _is_stale(doc["updated_at"]):
-            await _reclaim(cache_key)
-            return await _process(cache_key, content_hash, filename, content, existing_file_path)
-
-    raise StillProcessingError()
