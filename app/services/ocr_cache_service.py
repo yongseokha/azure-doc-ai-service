@@ -130,6 +130,7 @@ async def _process(
                 "result_json_path": result_json_path,
                 "char_count": len(text),
                 "page_count": page_count,
+                "error_message": None,
                 "updated_at": _now_iso(),
             }
         )
