@@ -9,7 +9,7 @@ from app.services import document_intelligence_service, file_storage_service, se
 from app.services.document_intelligence_service import DEFAULT_MODEL_ID
 
 OUTPUT_FORMAT = "markdown"
-STALE_PROCESSING_THRESHOLD = timedelta(hours=1)
+STALE_PROCESSING_THRESHOLD = timedelta(minutes=20)
 
 
 def _build_cache_key(content_hash: str) -> str:
