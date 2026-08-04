@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     azure_file_share_name: str = "ocr-archive"
 
     max_upload_size_mb: int = 20
+    document_intelligence_timeout_seconds: int = 300
 
     @property
     def max_upload_size_bytes(self) -> int:
@@ -25,3 +26,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+print(settings.model_dump())

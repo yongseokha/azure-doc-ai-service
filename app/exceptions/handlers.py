@@ -41,6 +41,16 @@ class StillProcessingError(AppException):
         super().__init__("문서가 아직 처리 중입니다. 잠시 후 다시 시도해주세요.", status_code=202)
 
 
+class DocumentAnalysisTimeoutError(AppException):
+    def __init__(self, timeout_seconds: int):
+        super().__init__(f"Document Intelligence 처리 시간이 {timeout_seconds}초를 초과했습니다.", status_code=504)
+
+
+class DocumentNotFoundError(AppException):
+    def __init__(self):
+        super().__init__("해당 문서를 찾을 수 없습니다.", status_code=404)
+
+
 def _envelope(status_code: int, status_msg: str) -> dict:
     return {"statusCode": status_code, "statusMsg": status_msg, "result": None}
 

@@ -42,19 +42,23 @@ def _is_stale(updated_at) -> bool:
     return datetime.now(timezone.utc) - updated_at > STALE_PROCESSING_THRESHOLD
 
 
-async def get_or_process(
-    content: bytes,
-    filename: str,
-    content_type: str | None,
-    existing_file_path: str | None = None,
-) -> ParsedDocument:
+async def claim(
+    content: bytes, filename: str, content_type: str | None
+) -> tuple[str, str, ParsedDocument | None]:
+    """캐시를 확인하고, 처리가 필요하면 처리 권한을 선점한다.
+
+    반환값은 (cache_key, content_hash, cached_result)이며, cached_result가
+    있으면 이미 완료된 결과를 그대로 쓰면 되고, None이면 호출자가
+    process_and_store()를 (백그라운드로) 실행해야 한다.
+    이미 다른 요청이 처리 중이면 StillProcessingError를 발생시킨다.
+    """
     content_hash = hashlib.sha256(content).hexdigest()
     cache_key = _build_cache_key(content_hash)
 
     doc = await search_index_service.get_document(cache_key)
 
     if doc is not None and doc["status"] == "completed":
-        return await _serve_cached(doc, filename)
+        return cache_key, content_hash, await _serve_cached(doc, filename)
 
     if doc is not None and doc["status"] == "processing" and not _is_stale(doc["updated_at"]):
         raise StillProcessingError()
@@ -64,7 +68,23 @@ async def get_or_process(
     else:
         await _reclaim(cache_key)
 
-    return await _process(cache_key, content_hash, filename, content, existing_file_path)
+    return cache_key, content_hash, None
+
+
+async def get_status(document_hash: str) -> ParsedDocument | None:
+    cache_key = _build_cache_key(document_hash)
+    doc = await search_index_service.get_document(cache_key)
+    if doc is None:
+        return None
+
+    return ParsedDocument(
+        status=doc["status"],
+        cache_hit=False,
+        document_hash=document_hash,
+        result_file_path=doc.get("result_file_path"),
+        result_json_path=doc.get("result_json_path"),
+        error_message=doc.get("error_message"),
+    )
 
 
 async def _claim_new(
@@ -95,13 +115,15 @@ async def _reclaim(cache_key: str) -> None:
     )
 
 
-async def _process(
+async def process_and_store(
     cache_key: str,
     content_hash: str,
     filename: str,
     content: bytes,
     existing_file_path: str | None,
-) -> ParsedDocument:
+) -> None:
+    """실제 OCR 처리를 수행하고 결과를 저장한다. 백그라운드 태스크로 실행되므로
+    호출자에게 반환할 응답이 없고, 성공/실패 여부는 상태 저장소에 기록된다."""
     original_path = existing_file_path or _build_original_path(content_hash, filename)
     result_path = _build_result_path(content_hash)
     result_json_path = _build_result_json_path(content_hash)
@@ -135,14 +157,6 @@ async def _process(
         await search_index_service.merge_or_upload_document(
             {"id": cache_key, "status": "failed", "error_message": str(exc), "updated_at": _now_iso()}
         )
-        raise
-
-    return ParsedDocument(
-        cache_hit=False,
-        document_hash=content_hash,
-        result_file_path=result_path,
-        result_json_path=result_json_path,
-    )
 
 
 async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:
@@ -156,6 +170,7 @@ async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:
     )
 
     return ParsedDocument(
+        status="completed",
         cache_hit=True,
         document_hash=doc["content_hash"],
         result_file_path=doc["result_file_path"],
