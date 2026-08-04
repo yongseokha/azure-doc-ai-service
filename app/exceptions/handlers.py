@@ -36,11 +36,6 @@ class SearchIndexError(AppException):
         super().__init__(f"AI Search 인덱스 처리 중 오류가 발생했습니다: {detail}", status_code=502)
 
 
-class StillProcessingError(AppException):
-    def __init__(self):
-        super().__init__("문서가 아직 처리 중입니다. 잠시 후 다시 시도해주세요.", status_code=202)
-
-
 class DocumentAnalysisTimeoutError(AppException):
     def __init__(self, timeout_seconds: int):
         super().__init__(f"Document Intelligence 처리 시간이 {timeout_seconds}초를 초과했습니다.", status_code=504)

@@ -53,7 +53,7 @@ async def upload_file(path: str, content: bytes) -> None:
 
     try:
         await temp_file_client.upload_file(content)
-        await temp_file_client.rename_file(path)
+        await temp_file_client.rename_file(path, overwrite=True)
     except Exception as exc:
         try:
             await temp_file_client.delete_file()

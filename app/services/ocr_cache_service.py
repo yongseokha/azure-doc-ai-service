@@ -1,10 +1,10 @@
+import asyncio
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.exceptions.handlers import StillProcessingError
-from app.schemas.document import ParsedDocument
+from app.schemas.document import DocumentState, ParsedDocument
 from app.services import document_intelligence_service, file_storage_service, search_index_service
 from app.services.document_intelligence_service import DEFAULT_MODEL_ID
 
@@ -47,10 +47,9 @@ async def claim(
 ) -> tuple[str, str, ParsedDocument | None]:
     """캐시를 확인하고, 처리가 필요하면 처리 권한을 선점한다.
 
-    반환값은 (cache_key, content_hash, cached_result)이며, cached_result가
-    있으면 이미 완료된 결과를 그대로 쓰면 되고, None이면 호출자가
-    process_and_store()를 (백그라운드로) 실행해야 한다.
-    이미 다른 요청이 처리 중이면 StillProcessingError를 발생시킨다.
+    반환값은 (cache_key, content_hash, result)이며, result가 있으면
+    (완료된 캐시 또는 이미 처리 중) 그대로 응답에 쓰면 되고, None이면
+    호출자가 process_and_store()를 (백그라운드로) 실행해야 한다.
     """
     content_hash = hashlib.sha256(content).hexdigest()
     cache_key = _build_cache_key(content_hash)
@@ -61,7 +60,8 @@ async def claim(
         return cache_key, content_hash, await _serve_cached(doc, filename)
 
     if doc is not None and doc["status"] == "processing" and not _is_stale(doc["updated_at"]):
-        raise StillProcessingError()
+        processing = ParsedDocument(status="processing", cache_hit=False, document_hash=content_hash)
+        return cache_key, content_hash, processing
 
     if doc is None:
         await _claim_new(cache_key, content_hash, filename, content_type, len(content))
@@ -71,15 +71,14 @@ async def claim(
     return cache_key, content_hash, None
 
 
-async def get_status(document_hash: str) -> ParsedDocument | None:
+async def get_status(document_hash: str) -> DocumentState | None:
     cache_key = _build_cache_key(document_hash)
     doc = await search_index_service.get_document(cache_key)
     if doc is None:
         return None
 
-    return ParsedDocument(
+    return DocumentState(
         status=doc["status"],
-        cache_hit=False,
         document_hash=document_hash,
         result_file_path=doc.get("result_file_path"),
         result_json_path=doc.get("result_json_path"),
@@ -135,7 +134,7 @@ async def process_and_store(
         result = await document_intelligence_service.analyze_document(content, model_id=DEFAULT_MODEL_ID)
         text = result.content or ""
         page_count = len(result.pages or [])
-        result_json = json.dumps(result.as_dict(), ensure_ascii=False)
+        result_json = await asyncio.to_thread(lambda: json.dumps(result.as_dict(), ensure_ascii=False))
 
         await file_storage_service.upload_file(result_path, text.encode("utf-8"))
         await file_storage_service.upload_file(result_json_path, result_json.encode("utf-8"))
