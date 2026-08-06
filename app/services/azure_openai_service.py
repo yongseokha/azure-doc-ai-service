@@ -29,6 +29,7 @@ async def close() -> None:
 @dataclass
 class StructuredCompletion:
     content: str
+    model: str
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
@@ -64,6 +65,7 @@ async def create_structured_completion(
 
     return StructuredCompletion(
         content=response.choices[0].message.content or "",
+        model=response.model,
         prompt_tokens=usage.prompt_tokens if usage else 0,
         completion_tokens=usage.completion_tokens if usage else 0,
         cached_tokens=cached_tokens,

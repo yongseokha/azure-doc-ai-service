@@ -62,6 +62,7 @@ class TermsNameResult(BaseModel):
 
 
 class UsageSummary(BaseModel):
+    model: str = Field(description="실제 응답에 사용된 모델 (Azure OpenAI 응답의 model 필드)")
     llmCallCount: int
     totalPromptTokens: int
     totalCompletionTokens: int

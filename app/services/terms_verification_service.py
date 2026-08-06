@@ -88,6 +88,7 @@ def _aggregate_usage(metrics: list[StructuredCompletion]) -> UsageSummary:
     count = len(metrics)
     total_elapsed = sum(m.elapsed_ms for m in metrics)
     return UsageSummary(
+        model=metrics[0].model if metrics else "",
         llmCallCount=count,
         totalPromptTokens=sum(m.prompt_tokens for m in metrics),
         totalCompletionTokens=sum(m.completion_tokens for m in metrics),
