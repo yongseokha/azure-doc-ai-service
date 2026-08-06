@@ -27,7 +27,7 @@ async def _resolve_content(
 
     content = await file_storage_service.download_file(file_path)
     filename = file_path.rsplit("/", 1)[-1]
-    return content, filename, None, file_path
+    return content, filename, properties.content_settings.content_type, file_path
 
 
 @router.post(
@@ -53,7 +53,7 @@ async def parse_document_with_document_intelligence(
     """
     Document Intelligence로 문서를 OCR 처리합니다.
 
-    - 같은 내용의 문서가 이미 처리된 적이 있으면 캐시된 결과를 즉시 반환합니다 (`cache_hit=true`, `status=completed`).
+    - 같은 내용의 문서가 이미 처리된 적이 있으면 `200`과 함께 캐시된 결과를 즉시 반환합니다 (`cache_hit=true`, `status=completed`).
     - 새로 처리해야 하거나 이미 처리 중인 문서는 `202`와 `document_hash`를 즉시 반환하고,
       실제 OCR은 백그라운드에서 진행됩니다. `GET /documents/{document_hash}/status`로 진행 상태를 조회하세요.
     - `file`(직접 업로드) 또는 `filePath`(Azure File Storage 내 기존 경로) 중 정확히 하나만 지정해야 합니다.
@@ -72,7 +72,13 @@ async def parse_document_with_document_intelligence(
         return ApiResponse[ParsedDocument](statusCode=status_code, statusMsg=status_msg, result=result)
 
     background_tasks.add_task(
-        ocr_cache_service.process_and_store, cache_key, content_hash, filename, content, existing_file_path
+        ocr_cache_service.process_and_store,
+        cache_key,
+        content_hash,
+        filename,
+        content,
+        content_type,
+        existing_file_path,
     )
 
     response.status_code = 202
