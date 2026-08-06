@@ -10,6 +10,9 @@ class AppException(Exception):
         self.message = message
         self.status_code = status_code
 
+    def __str__(self) -> str:
+        return self.message
+
 
 class FileTooLargeError(AppException):
     def __init__(self, max_size_mb: int):
@@ -44,6 +47,16 @@ class DocumentAnalysisTimeoutError(AppException):
 class DocumentNotFoundError(AppException):
     def __init__(self):
         super().__init__("해당 문서를 찾을 수 없습니다.", status_code=404)
+
+
+class DocumentNotReadyError(AppException):
+    def __init__(self, document_hash: str):
+        super().__init__(f"문서가 아직 처리 중입니다: {document_hash}", status_code=409)
+
+
+class AzureOpenAIError(AppException):
+    def __init__(self, detail: str):
+        super().__init__(f"Azure OpenAI 호출 중 오류가 발생했습니다: {detail}", status_code=502)
 
 
 def _envelope(status_code: int, status_msg: str) -> dict:

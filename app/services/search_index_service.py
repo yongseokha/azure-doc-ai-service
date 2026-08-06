@@ -54,6 +54,7 @@ def _build_index() -> SearchIndex:
             SimpleField(name="result_json_path", type=SearchFieldDataType.String),
             SimpleField(name="char_count", type=SearchFieldDataType.Int32),
             SimpleField(name="page_count", type=SearchFieldDataType.Int32),
+            SimpleField(name="processing_duration_seconds", type=SearchFieldDataType.Double),
             SimpleField(name="error_message", type=SearchFieldDataType.String),
             SimpleField(name="hit_count", type=SearchFieldDataType.Int32),
             SimpleField(name="created_at", type=SearchFieldDataType.DateTimeOffset, filterable=True),

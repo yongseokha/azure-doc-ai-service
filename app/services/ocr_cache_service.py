@@ -1,9 +1,11 @@
 import asyncio
 import hashlib
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.exceptions.handlers import DocumentIntelligenceError, DocumentNotFoundError, DocumentNotReadyError
 from app.schemas.document import DocumentState, ParsedDocument
 from app.services import document_intelligence_service, file_storage_service, search_index_service
 from app.services.document_intelligence_service import DEFAULT_MODEL_ID
@@ -86,6 +88,23 @@ async def get_status(document_hash: str) -> DocumentState | None:
     )
 
 
+async def get_result_text(document_hash: str) -> str:
+    """document_hash로 캐시된 OCR 결과(markdown 본문)를 가져온다.
+
+    약관검증 서비스처럼 이미 parse-di로 처리된 문서를 재사용하는 경우에 쓴다.
+    """
+    state = await get_status(document_hash)
+    if state is None:
+        raise DocumentNotFoundError()
+    if state.status == "processing":
+        raise DocumentNotReadyError(document_hash)
+    if state.status == "failed":
+        raise DocumentIntelligenceError(state.error_message or "OCR 처리에 실패했습니다")
+
+    content = await file_storage_service.download_file(state.result_file_path)
+    return content.decode("utf-8")
+
+
 async def _claim_new(
     cache_key: str, content_hash: str, filename: str, content_type: str | None, size_bytes: int
 ) -> None:
@@ -119,6 +138,7 @@ async def process_and_store(
     content_hash: str,
     filename: str,
     content: bytes,
+    content_type: str | None,
     existing_file_path: str | None,
 ) -> None:
     """실제 OCR 처리를 수행하고 결과를 저장한다. 백그라운드 태스크로 실행되므로
@@ -129,9 +149,11 @@ async def process_and_store(
 
     try:
         if existing_file_path is None:
-            await file_storage_service.upload_file(original_path, content)
+            await file_storage_service.upload_file(original_path, content, content_type=content_type)
 
+        started_at = time.monotonic()
         result = await document_intelligence_service.analyze_document(content, model_id=DEFAULT_MODEL_ID)
+        processing_duration_seconds = time.monotonic() - started_at
         text = result.content or ""
         page_count = len(result.pages or [])
         result_json = await asyncio.to_thread(lambda: json.dumps(result.as_dict(), ensure_ascii=False))
@@ -148,6 +170,7 @@ async def process_and_store(
                 "result_json_path": result_json_path,
                 "char_count": len(text),
                 "page_count": page_count,
+                "processing_duration_seconds": processing_duration_seconds,
                 "error_message": None,
                 "updated_at": _now_iso(),
             }

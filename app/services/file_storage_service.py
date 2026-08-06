@@ -3,7 +3,7 @@ from functools import lru_cache
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.fileshare.aio import ShareServiceClient
-from azure.storage.fileshare import FileProperties
+from azure.storage.fileshare import ContentSettings, FileProperties
 
 from app.core.config import settings
 from app.exceptions.handlers import FileStorageError
@@ -43,7 +43,7 @@ async def _ensure_directories(path: str) -> None:
             pass
 
 
-async def upload_file(path: str, content: bytes) -> None:
+async def upload_file(path: str, content: bytes, content_type: str | None = None) -> None:
     """임시 경로에 업로드를 완료한 뒤 원자적으로 rename하여, 쓰는 도중의 파일이 노출되지 않게 한다."""
     await _ensure_directories(path)
 
@@ -51,8 +51,10 @@ async def upload_file(path: str, content: bytes) -> None:
     temp_path = f"{path}.uploading-{uuid.uuid4().hex}"
     temp_file_client = share_client.get_file_client(temp_path)
 
+    content_settings = ContentSettings(content_type=content_type) if content_type else None
+
     try:
-        await temp_file_client.upload_file(content)
+        await temp_file_client.upload_file(content, content_settings=content_settings)
         await temp_file_client.rename_file(path, overwrite=True)
     except Exception as exc:
         try:
