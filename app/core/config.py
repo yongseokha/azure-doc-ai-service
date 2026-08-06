@@ -13,9 +13,17 @@ class Settings(BaseSettings):
     azure_search_endpoint: str
     azure_search_api_key: str
     azure_search_index_name: str = "ocr-documents"
+    azure_search_terms_index_name: str = "terms-verification-jobs"
 
     azure_file_storage_connection_string: str
     azure_file_share_name: str = "ocr-archive"
+
+    azure_openai_endpoint: str
+    azure_openai_api_key: str
+    azure_openai_deployment_name: str
+    azure_openai_api_version: str = "2024-12-01-preview"
+    azure_openai_timeout_seconds: float = 60.0
+    terms_verification_concurrency: int = 5
 
     max_upload_size_mb: int = 20
     document_intelligence_timeout_seconds: int = 300
@@ -26,5 +34,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-print(settings.model_dump())

@@ -11,7 +11,14 @@ from app.exceptions.handlers import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.services import document_intelligence_service, file_storage_service, search_index_service
+from app.services import (
+    azure_openai_service,
+    callback_service,
+    document_intelligence_service,
+    file_storage_service,
+    search_index_service,
+    terms_job_service,
+)
 
 
 @asynccontextmanager
@@ -19,11 +26,15 @@ async def lifespan(app: FastAPI):
     try:
         await file_storage_service.ensure_share_exists()
         await search_index_service.ensure_index_exists()
+        await terms_job_service.ensure_index_exists()
         yield
     finally:
         await document_intelligence_service.close()
         await file_storage_service.close()
         await search_index_service.close()
+        await azure_openai_service.close()
+        await callback_service.close()
+        await terms_job_service.close()
 
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
