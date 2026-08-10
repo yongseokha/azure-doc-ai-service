@@ -43,6 +43,9 @@ async def parse_document_with_document_intelligence(
     rqtKey: str = Form(
         default="", description="요청키 (클라이언트 생성 랜덤 키)", examples=["k3n9X2b7QsT1m8pZ..."]
     ),
+    termId: str = Form(default="", description="약관 ID", examples=["T12345"]),
+    termHstSeq: str = Form(default="", description="약관 이력 순번", examples=["1"]),
+    fileDivCd: str = Form(default="", description="파일 구분 코드", examples=["01"]),
     file: UploadFile | None = File(default=None, description="업로드할 문서 파일 (PDF, DOCX 등)"),
     filePath: str | None = Form(
         default=None,
@@ -57,6 +60,8 @@ async def parse_document_with_document_intelligence(
     - 새로 처리해야 하거나 이미 처리 중인 문서는 `202`와 `document_hash`를 즉시 반환하고,
       실제 OCR은 백그라운드에서 진행됩니다. `GET /documents/{document_hash}/status`로 진행 상태를 조회하세요.
     - `file`(직접 업로드) 또는 `filePath`(Azure File Storage 내 기존 경로) 중 정확히 하나만 지정해야 합니다.
+    - 새로 처리를 시작한 경우, 완료 또는 실패 시 고정된 콜백 URL로 `termId`, `termHstSeq`, `fileDivCd`를
+      받은 그대로 실어서 결과(`ocrRestlKey`) 또는 오류(`ocrErrSbst`)를 전송합니다.
     """
     content, filename, content_type, existing_file_path = await _resolve_content(file, filePath)
 
@@ -79,6 +84,9 @@ async def parse_document_with_document_intelligence(
         content,
         content_type,
         existing_file_path,
+        termId,
+        termHstSeq,
+        fileDivCd,
     )
 
     response.status_code = 202

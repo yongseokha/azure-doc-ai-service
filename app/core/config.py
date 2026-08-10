@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     max_upload_size_mb: int = 20
     document_intelligence_timeout_seconds: int = 300
+    document_intelligence_callback_url: str
 
     @property
     def max_upload_size_bytes(self) -> int:

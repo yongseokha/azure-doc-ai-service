@@ -5,9 +5,10 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.core.config import settings
 from app.exceptions.handlers import DocumentIntelligenceError, DocumentNotFoundError, DocumentNotReadyError
 from app.schemas.document import DocumentState, ParsedDocument
-from app.services import document_intelligence_service, file_storage_service, search_index_service
+from app.services import callback_service, document_intelligence_service, file_storage_service, search_index_service
 from app.services.document_intelligence_service import DEFAULT_MODEL_ID
 
 OUTPUT_FORMAT = "markdown"
@@ -133,6 +134,19 @@ async def _reclaim(cache_key: str) -> None:
     )
 
 
+async def _send_di_callback(
+    term_id: str, term_hst_seq: str, file_div_cd: str, ocr_restl_key: str | None, ocr_err_sbst: str | None
+) -> None:
+    body = {
+        "termId": term_id,
+        "termHstSeq": term_hst_seq,
+        "fileDivCd": file_div_cd,
+        "ocrRestlKey": ocr_restl_key,
+        "ocrErrSbst": ocr_err_sbst,
+    }
+    await callback_service.send_callback(settings.document_intelligence_callback_url, body)
+
+
 async def process_and_store(
     cache_key: str,
     content_hash: str,
@@ -140,9 +154,12 @@ async def process_and_store(
     content: bytes,
     content_type: str | None,
     existing_file_path: str | None,
+    term_id: str,
+    term_hst_seq: str,
+    file_div_cd: str,
 ) -> None:
     """실제 OCR 처리를 수행하고 결과를 저장한다. 백그라운드 태스크로 실행되므로
-    호출자에게 반환할 응답이 없고, 성공/실패 여부는 상태 저장소에 기록된다."""
+    호출자에게 반환할 응답이 없고, 성공/실패 여부는 상태 저장소에 기록되며 콜백으로도 전송된다."""
     original_path = existing_file_path or _build_original_path(content_hash, filename)
     result_path = _build_result_path(content_hash)
     result_json_path = _build_result_json_path(content_hash)
@@ -175,10 +192,12 @@ async def process_and_store(
                 "updated_at": _now_iso(),
             }
         )
+        await _send_di_callback(term_id, term_hst_seq, file_div_cd, ocr_restl_key=content_hash, ocr_err_sbst=None)
     except Exception as exc:
         await search_index_service.merge_or_upload_document(
             {"id": cache_key, "status": "failed", "error_message": str(exc), "updated_at": _now_iso()}
         )
+        await _send_di_callback(term_id, term_hst_seq, file_div_cd, ocr_restl_key=None, ocr_err_sbst=str(exc))
 
 
 async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:
