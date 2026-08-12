@@ -135,13 +135,13 @@ async def _reclaim(cache_key: str) -> None:
 
 
 async def _send_di_callback(
-    term_id: str, term_hst_seq: str, file_div_cd: str, ocr_restl_key: str | None, ocr_err_sbst: str | None
+    term_id: str, term_hst_seq: str, file_div_cd: str, ocr_reslt_key: str | None, ocr_err_sbst: str | None
 ) -> None:
     body = {
         "termId": term_id,
         "termHstSeq": term_hst_seq,
         "fileDivCd": file_div_cd,
-        "ocrRestlKey": ocr_restl_key,
+        "ocrResltKey": ocr_reslt_key,
         "ocrErrSbst": ocr_err_sbst,
     }
     await callback_service.send_callback(settings.document_intelligence_callback_url, body)
@@ -192,12 +192,12 @@ async def process_and_store(
                 "updated_at": _now_iso(),
             }
         )
-        await _send_di_callback(term_id, term_hst_seq, file_div_cd, ocr_restl_key=content_hash, ocr_err_sbst=None)
+        await _send_di_callback(term_id, term_hst_seq, file_div_cd, ocr_reslt_key=content_hash, ocr_err_sbst=None)
     except Exception as exc:
         await search_index_service.merge_or_upload_document(
             {"id": cache_key, "status": "failed", "error_message": str(exc), "updated_at": _now_iso()}
         )
-        await _send_di_callback(term_id, term_hst_seq, file_div_cd, ocr_restl_key=None, ocr_err_sbst=str(exc))
+        await _send_di_callback(term_id, term_hst_seq, file_div_cd, ocr_reslt_key=None, ocr_err_sbst=str(exc))
 
 
 async def _serve_cached(doc: dict, filename: str) -> ParsedDocument:

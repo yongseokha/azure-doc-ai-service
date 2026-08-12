@@ -61,7 +61,7 @@ async def parse_document_with_document_intelligence(
       실제 OCR은 백그라운드에서 진행됩니다. `GET /documents/{document_hash}/status`로 진행 상태를 조회하세요.
     - `file`(직접 업로드) 또는 `filePath`(Azure File Storage 내 기존 경로) 중 정확히 하나만 지정해야 합니다.
     - 새로 처리를 시작한 경우, 완료 또는 실패 시 고정된 콜백 URL로 `termId`, `termHstSeq`, `fileDivCd`를
-      받은 그대로 실어서 결과(`ocrRestlKey`) 또는 오류(`ocrErrSbst`)를 전송합니다.
+      받은 그대로 실어서 결과(`ocrResltKey`) 또는 오류(`ocrErrSbst`)를 전송합니다.
     """
     content, filename, content_type, existing_file_path = await _resolve_content(file, filePath)
 
