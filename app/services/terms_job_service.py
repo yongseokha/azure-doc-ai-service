@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
@@ -58,8 +57,8 @@ def _build_index() -> SearchIndex:
             SimpleField(name="total_cached_tokens", type=SearchFieldDataType.Int32),
             SimpleField(name="total_elapsed_ms", type=SearchFieldDataType.Double),
             SimpleField(name="result_file_path", type=SearchFieldDataType.String),
-            SimpleField(name="callback_url", type=SearchFieldDataType.String),
-            SimpleField(name="callback_params", type=SearchFieldDataType.String),
+            SimpleField(name="knwlg_info_id", type=SearchFieldDataType.Int64),
+            SimpleField(name="term_vrf_seq", type=SearchFieldDataType.Int32),
             SimpleField(name="callback_status", type=SearchFieldDataType.String),
             SimpleField(name="error_message", type=SearchFieldDataType.String),
             SimpleField(name="created_at", type=SearchFieldDataType.DateTimeOffset, filterable=True),
@@ -104,7 +103,7 @@ async def get_job(rqt_key: str) -> dict | None:
 async def claim_job(request: TermsVerificationRequest) -> None:
     """새 job이든, 처리중 상태가 stale해서 재처리하는 job이든 동일하게 처리 상태로 (재)기록한다."""
     now = _now_iso()
-    item_count = sum(len(group.items) for group in request.names)
+    item_count = sum(len(group.items) for group in request.data)
     await _merge_or_upload(
         {
             "id": request.rqtKey,
@@ -112,10 +111,10 @@ async def claim_job(request: TermsVerificationRequest) -> None:
             "inf_id": request.infId,
             "status": "processing",
             "document_count": len(request.documentHash),
-            "names_count": len(request.names),
+            "names_count": len(request.data),
             "item_count": item_count,
-            "callback_url": request.callbackUrl,
-            "callback_params": json.dumps(request.callbackParams, ensure_ascii=False),
+            "knwlg_info_id": request.knwlgInfoId,
+            "term_vrf_seq": request.termVrfSeq,
             "callback_status": "pending",
             "error_message": None,
             "created_at": now,

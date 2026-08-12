@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -6,8 +6,8 @@ from app.schemas.base import ApiRequest
 
 
 class DocumentReference(BaseModel):
-    hashKey: str = Field(examples=["a3f5c9d8e1b2..."], description="OCR 캐시 조회 키 (문서 해시)")
-    termsName: str = Field(examples=["KT 요고 시리즈 이용약관"], description="표시용 약관명 (처리 로직에는 사용되지 않음)")
+    ocrResltKey: str = Field(examples=["a3f5c9d8e1b2..."], description="OCR 캐시 조회 키 (문서 해시)")
+    termNm: str = Field(examples=["KT 요고 시리즈 이용약관"], description="표시용 약관명 (처리 로직에는 사용되지 않음)")
 
 
 class TermsItem(BaseModel):
@@ -15,12 +15,13 @@ class TermsItem(BaseModel):
     value: str | None = Field(default=None, examples=["개인, 미성년자, 외국인"], description="검증할 값. 없으면 약관에서 추출")
     desc: str | None = Field(default=None, description="itemNm 필드에 대한 설명")
 
-    @field_validator("value", "desc", mode="before")
+    @field_validator("value", "desc", mode="after")
     @classmethod
-    def _blank_as_none(cls, value: object) -> object:
-        # 빈 문자열은 "값 없음"과 동일하게 취급한다. 문자열이 아닌 값은 그대로 흘려보내서
-        # pydantic 자체의 타입 검증(422)이 처리하게 한다 (여기서 .strip()을 호출하면 안 됨).
-        if isinstance(value, str) and value.strip() == "":
+    def _blank_as_none(cls, value: str | None) -> str | None:
+        # mode="after"라 이 시점엔 value가 이미 str | None으로 타입 검증이 끝난 뒤다
+        # (문자열이 아닌 입력은 여기 도달하기 전에 pydantic이 422로 걸러낸다).
+        # 빈 문자열은 "값 없음"과 동일하게 취급한다.
+        if value is not None and value.strip() == "":
             return None
         return value
 
@@ -32,13 +33,9 @@ class TermsNameGroup(BaseModel):
 
 class TermsVerificationRequest(ApiRequest):
     documentHash: list[DocumentReference] = Field(min_length=1, description="검증에 쓰일 약관 문서 풀")
-    names: list[TermsNameGroup] = Field(min_length=1, description="각 name의 items는 documentHash의 모든 문서와 교차 비교됨")
-    callbackUrl: str = Field(description="처리 완료 후 결과를 전달할 콜백 URL")
-    callbackParams: dict[str, Any] = Field(
-        default_factory=dict,
-        description="콜백 호출 시 결과 본문 최상위에 그대로 실어 보낼 임의의 파라미터 (예: knwlgInfold, termVrseq). 타입 제약 없이 그대로 echo됨",
-        examples=[{"knwlgInfold": "...", "termVrseq": "..."}],
-    )
+    data: list[TermsNameGroup] = Field(min_length=1, description="각 name의 items는 documentHash의 모든 문서와 교차 비교됨")
+    knwlgInfoId: int = Field(description="지식 정보 ID (콜백 본문에 받은 그대로 실려감)")
+    termVrfSeq: int = Field(description="약관 버전 순번 (콜백 본문에 받은 그대로 실려감)")
 
 
 class TermsItemResult(BaseModel):
@@ -51,8 +48,8 @@ class TermsItemResult(BaseModel):
 
 
 class TermsDocumentItemsResult(BaseModel):
-    hashKey: str
-    termsName: str
+    ocrResltKey: str
+    termNm: str
     items: list[TermsItemResult]
 
 
@@ -72,5 +69,5 @@ class UsageSummary(BaseModel):
 
 
 class TermsVerificationResult(BaseModel):
-    names: list[TermsNameResult]
+    data: list[TermsNameResult]
     usage: UsageSummary

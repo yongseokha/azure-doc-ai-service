@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-12-01-preview"
     azure_openai_timeout_seconds: float = 60.0
     terms_verification_concurrency: int = 5
+    terms_verification_callback_url: str
 
     max_upload_size_mb: int = 20
     document_intelligence_timeout_seconds: int = 300

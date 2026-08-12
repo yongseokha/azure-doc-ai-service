@@ -1,6 +1,5 @@
 import asyncio
 import json
-from typing import Any
 
 from app.core.config import settings
 from app.schemas.terms import (
@@ -79,7 +78,7 @@ async def _verify_one(name: str, item: TermsItem, document_text: str) -> tuple[T
 
 
 async def _load_documents(refs: list[DocumentReference]) -> dict[str, str]:
-    unique_hashes = list({ref.hashKey for ref in refs})
+    unique_hashes = list({ref.ocrResltKey for ref in refs})
     texts = await asyncio.gather(*(ocr_cache_service.get_result_text(h) for h in unique_hashes))
     return dict(zip(unique_hashes, texts))
 
@@ -103,7 +102,7 @@ def _assemble(
     calls: list[tuple[str, str, TermsItem]],
     item_results: tuple[TermsItemResult, ...],
 ) -> list[TermsNameResult]:
-    ref_by_hash = {ref.hashKey: ref for ref in document_hash}
+    ref_by_hash = {ref.ocrResltKey: ref for ref in document_hash}
 
     by_name: dict[str, dict[str, list[TermsItemResult]]] = {}
     for (name, hash_key, _item), result in zip(calls, item_results):
@@ -113,7 +112,7 @@ def _assemble(
         TermsNameResult(
             name=name,
             documents=[
-                TermsDocumentItemsResult(hashKey=hash_key, termsName=ref_by_hash[hash_key].termsName, items=items)
+                TermsDocumentItemsResult(ocrResltKey=hash_key, termNm=ref_by_hash[hash_key].termNm, items=items)
                 for hash_key, items in docs.items()
             ],
         )
@@ -122,13 +121,13 @@ def _assemble(
 
 
 async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsNameResult], UsageSummary]:
-    # hashKey 기준으로 중복 제거 - 같은 문서가 두 번 오면 LLM 호출도 두 번 실행되는 걸 막는다.
-    unique_refs = list({ref.hashKey: ref for ref in request.documentHash}.values())
+    # ocrResltKey 기준으로 중복 제거 - 같은 문서가 두 번 오면 LLM 호출도 두 번 실행되는 걸 막는다.
+    unique_refs = list({ref.ocrResltKey: ref for ref in request.documentHash}.values())
     text_by_hash = await _load_documents(unique_refs)
 
     calls = [
-        (group.name, ref.hashKey, item)
-        for group in request.names
+        (group.name, ref.ocrResltKey, item)
+        for group in request.data
         for ref in unique_refs
         for item in group.items
     ]
@@ -157,21 +156,17 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
 
 
 def _build_callback_body(request: TermsVerificationRequest, status_code: int, status_msg: str, result: TermsVerificationResult | None) -> dict:
-    # callbackParams를 먼저 깔고 우리 필드를 그 위에 덮어써야, callbackParams 안에 우연히 같은 키
-    # (예: rqtKey, statusCode)가 있어도 실제 결과가 클라이언트 값에 덮어써지지 않는다.
-    body = dict(request.callbackParams)
-    body.update(
-        {
-            "userId": request.userId,
-            "infId": request.infId,
-            "rqtKey": request.rqtKey,
-            "statusCode": status_code,
-            "statusMsg": status_msg,
-            "names": [n.model_dump() for n in result.names] if result else None,
-            "usage": result.usage.model_dump() if result else None,
-        }
-    )
-    return body
+    return {
+        "userId": request.userId,
+        "infId": request.infId,
+        "rqtKey": request.rqtKey,
+        "knwlgInfoId": request.knwlgInfoId,
+        "termVrfSeq": request.termVrfSeq,
+        "statusCode": status_code,
+        "statusMsg": status_msg,
+        "data": [n.model_dump() for n in result.data] if result else None,
+        "usage": result.usage.model_dump() if result else None,
+    }
 
 
 async def process_and_callback(request: TermsVerificationRequest) -> None:
@@ -180,11 +175,11 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     except Exception as exc:
         await terms_job_service.mark_failed(request.rqtKey, str(exc))
         body = _build_callback_body(request, 500, f"약관 검증 처리 중 오류가 발생했습니다: {exc}", None)
-        success = await callback_service.send_callback(request.callbackUrl, body)
+        success = await callback_service.send_callback(settings.terms_verification_callback_url, body)
         await terms_job_service.record_callback_result(request.rqtKey, success)
         return
 
-    result = TermsVerificationResult(names=names_result, usage=usage)
+    result = TermsVerificationResult(data=names_result, usage=usage)
     result_path = f"{RESULT_ROOT}/{request.rqtKey}/result.json"
     await file_storage_service.upload_file(
         result_path, result.model_dump_json().encode("utf-8"), content_type="application/json"
@@ -192,26 +187,25 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     await terms_job_service.mark_completed(request.rqtKey, result_path, usage)
 
     body = _build_callback_body(request, 200, "OK", result)
-    success = await callback_service.send_callback(request.callbackUrl, body)
+    success = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(request.rqtKey, success)
 
 
-async def resend_stored_result(job: dict, callback_url: str, callback_params: dict[str, Any]) -> None:
+async def resend_stored_result(job: dict) -> None:
     """재검증 없이, 이미 완료된 job의 저장된 결과를 그대로 다시 콜백으로 전송한다."""
     content = await file_storage_service.download_file(job["result_file_path"])
     stored = json.loads(content.decode("utf-8"))
 
-    body = dict(callback_params)
-    body.update(
-        {
-            "userId": job["user_id"],
-            "infId": job["inf_id"],
-            "rqtKey": job["id"],
-            "statusCode": 200,
-            "statusMsg": "OK",
-            "names": stored["names"],
-            "usage": stored["usage"],
-        }
-    )
-    success = await callback_service.send_callback(callback_url, body)
+    body = {
+        "userId": job["user_id"],
+        "infId": job["inf_id"],
+        "rqtKey": job["id"],
+        "knwlgInfoId": job.get("knwlg_info_id"),
+        "termVrfSeq": job.get("term_vrf_seq"),
+        "statusCode": 200,
+        "statusMsg": "OK",
+        "data": stored["data"],
+        "usage": stored["usage"],
+    }
+    success = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(job["id"], success)
