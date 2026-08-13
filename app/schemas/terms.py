@@ -41,9 +41,11 @@ class TermsVerificationRequest(ApiRequest):
 class TermsItemResult(BaseModel):
     itemNm: str
     value: str | None
+    subClaim: str | None = Field(default=None, description="value가 여러 조건으로 분해된 경우, 그중 하나의 조건 (분해 안 됐으면 null)")
     status: Literal["MATCHED", "MISMATCH", "EXTRACTED", "NOT_FOUND"]
     llmValue: str | None = Field(default=None, description="약관 기준 확정값 (MISMATCH 시 정정값 포함)")
     evidence: str | None = Field(default=None, description="약관 원문 인용 (자동 검증되지 않은 참고용)")
+    page: int | None = Field(default=None, description="evidence가 위치한 페이지 번호 (자동 검증되지 않은 참고용)")
     reason: str | None = Field(default=None, description="MISMATCH/NOT_FOUND일 때 설명")
 
 
