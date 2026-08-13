@@ -60,6 +60,7 @@ def _build_index() -> SearchIndex:
             SimpleField(name="knwlg_info_id", type=SearchFieldDataType.Int64),
             SimpleField(name="term_vrf_seq", type=SearchFieldDataType.Int32),
             SimpleField(name="callback_status", type=SearchFieldDataType.String),
+            SimpleField(name="callback_message", type=SearchFieldDataType.String),
             SimpleField(name="error_message", type=SearchFieldDataType.String),
             SimpleField(name="created_at", type=SearchFieldDataType.DateTimeOffset, filterable=True),
             SimpleField(name="updated_at", type=SearchFieldDataType.DateTimeOffset, filterable=True),
@@ -152,11 +153,12 @@ async def mark_failed(rqt_key: str, error_message: str) -> None:
     )
 
 
-async def record_callback_result(rqt_key: str, success: bool) -> None:
+async def record_callback_result(rqt_key: str, success: bool, message: str | None = None) -> None:
     await _merge_or_upload(
         {
             "id": rqt_key,
             "callback_status": "success" if success else "failed",
+            "callback_message": message,
             "updated_at": _now_iso(),
         }
     )

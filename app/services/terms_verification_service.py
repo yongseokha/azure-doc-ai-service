@@ -175,8 +175,8 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     except Exception as exc:
         await terms_job_service.mark_failed(request.rqtKey, str(exc))
         body = _build_callback_body(request, 500, f"약관 검증 처리 중 오류가 발생했습니다: {exc}", None)
-        success = await callback_service.send_callback(settings.terms_verification_callback_url, body)
-        await terms_job_service.record_callback_result(request.rqtKey, success)
+        callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
+        await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
         return
 
     result = TermsVerificationResult(data=names_result, usage=usage)
@@ -187,8 +187,8 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     await terms_job_service.mark_completed(request.rqtKey, result_path, usage)
 
     body = _build_callback_body(request, 200, "OK", result)
-    success = await callback_service.send_callback(settings.terms_verification_callback_url, body)
-    await terms_job_service.record_callback_result(request.rqtKey, success)
+    callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
+    await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
 
 
 async def resend_stored_result(job: dict) -> None:
@@ -207,5 +207,5 @@ async def resend_stored_result(job: dict) -> None:
         "data": stored["data"],
         "usage": stored["usage"],
     }
-    success = await callback_service.send_callback(settings.terms_verification_callback_url, body)
-    await terms_job_service.record_callback_result(job["id"], success)
+    callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
+    await terms_job_service.record_callback_result(job["id"], callback_result.success, callback_result.message)
