@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,6 +11,8 @@ from app.exceptions.handlers import DocumentIntelligenceError, DocumentNotFoundE
 from app.schemas.document import DocumentState, ParsedDocument
 from app.services import callback_service, document_intelligence_service, file_storage_service, search_index_service
 from app.services.document_intelligence_service import DEFAULT_MODEL_ID
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_FORMAT = "markdown"
 STALE_PROCESSING_THRESHOLD = timedelta(minutes=20)
@@ -144,7 +147,11 @@ async def _send_di_callback(
         "ocrResltKey": ocr_reslt_key,
         "ocrErrSbst": ocr_err_sbst,
     }
-    await callback_service.send_callback(settings.document_intelligence_callback_url, body)
+    try:
+        await callback_service.send_callback(settings.document_intelligence_callback_url, body)
+    except Exception:
+        # 콜백 전송 문제가 OCR 성공/실패 판단에 영향을 주면 안 되므로, 여기서 무슨 예외가 나든 삼킨다.
+        logger.exception("DI 콜백 전송 중 예상하지 못한 오류가 발생했습니다.")
 
 
 async def process_and_store(
