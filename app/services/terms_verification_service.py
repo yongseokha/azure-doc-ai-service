@@ -181,12 +181,12 @@ async def _run_bounded(tasks: list[asyncio.Task]) -> tuple:
 
 async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsNameResult], UsageSummary]:
     # ocrResltKey 기준으로 중복 제거 - 같은 문서가 두 번 오면 LLM 호출도 두 번 실행되는 걸 막는다.
-    unique_refs = list({ref.ocrResltKey: ref for ref in request.documentHash}.values())
+    unique_refs = list({ref.ocrResltKey: ref for ref in request.termInfo}.values())
     text_by_hash = await _load_documents(unique_refs)
 
     semaphore = asyncio.Semaphore(settings.terms_verification_concurrency)
 
-    # 1) name+item 단위로 분해 (documentHash와 무관하게 1번씩만 - 문서 수만큼 중복 분해하지 않는다)
+    # 1) name+item 단위로 분해 (termInfo와 무관하게 1번씩만 - 문서 수만큼 중복 분해하지 않는다)
     item_entries = [(group.name, item) for group in request.data for item in group.items]
 
     async def _bounded_split(item: TermsItem) -> tuple[list[str | None], list[StructuredCompletion]]:
@@ -203,7 +203,7 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
         for claim in claims:
             claim_entries.append((name, item, claim))
 
-    # 2) 분해된 claim들을 documentHash 풀과 교차
+    # 2) 분해된 claim들을 termInfo 풀과 교차
     calls = [
         (name, ref.ocrResltKey, item, claim) for name, item, claim in claim_entries for ref in unique_refs
     ]
@@ -232,7 +232,6 @@ def _build_callback_body(request: TermsVerificationRequest, status_code: int, st
         "statusCode": status_code,
         "statusMsg": status_msg,
         "data": [n.model_dump() for n in result.data] if result else None,
-        "usage": result.usage.model_dump() if result else None,
     }
 
 
@@ -246,7 +245,7 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
         return
 
-    result = TermsVerificationResult(data=names_result, usage=usage)
+    result = TermsVerificationResult(data=names_result)
     result_path = f"{RESULT_ROOT}/{request.rqtKey}/result.json"
     await file_storage_service.upload_file(
         result_path, result.model_dump_json().encode("utf-8"), content_type="application/json"
@@ -272,7 +271,6 @@ async def resend_stored_result(job: dict) -> None:
         "statusCode": 200,
         "statusMsg": "OK",
         "data": stored["data"],
-        "usage": stored["usage"],
     }
     callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(job["id"], callback_result.success, callback_result.message)

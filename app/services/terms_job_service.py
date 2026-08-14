@@ -111,7 +111,7 @@ async def claim_job(request: TermsVerificationRequest) -> None:
             "user_id": request.userId,
             "inf_id": request.infId,
             "status": "processing",
-            "document_count": len(request.documentHash),
+            "document_count": len(request.termInfo),
             "names_count": len(request.data),
             "item_count": item_count,
             "knwlg_info_id": request.knwlgInfoId,

@@ -32,8 +32,8 @@ class TermsNameGroup(BaseModel):
 
 
 class TermsVerificationRequest(ApiRequest):
-    documentHash: list[DocumentReference] = Field(min_length=1, description="검증에 쓰일 약관 문서 풀")
-    data: list[TermsNameGroup] = Field(min_length=1, description="각 name의 items는 documentHash의 모든 문서와 교차 비교됨")
+    termInfo: list[DocumentReference] = Field(min_length=1, description="검증에 쓰일 약관 문서 풀")
+    data: list[TermsNameGroup] = Field(min_length=1, description="각 name의 items는 termInfo의 모든 문서와 교차 비교됨")
     knwlgInfoId: int = Field(description="지식 정보 ID (콜백 본문에 받은 그대로 실려감)")
     termVrfSeq: int = Field(description="약관 버전 순번 (콜백 본문에 받은 그대로 실려감)")
 
@@ -72,4 +72,3 @@ class UsageSummary(BaseModel):
 
 class TermsVerificationResult(BaseModel):
     data: list[TermsNameResult]
-    usage: UsageSummary
