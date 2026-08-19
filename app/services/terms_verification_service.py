@@ -154,15 +154,15 @@ async def _load_documents(refs: list[DocumentReference]) -> dict[str, str]:
 
 def _aggregate_usage(metrics: list[StructuredCompletion]) -> UsageSummary:
     count = len(metrics)
-    total_elapsed = sum(m.elapsed_ms for m in metrics)
+    total_elapsed_seconds = sum(m.elapsed_ms for m in metrics) / 1000
     return UsageSummary(
         model=metrics[0].model if metrics else "",
         llmCallCount=count,
         totalPromptTokens=sum(m.prompt_tokens for m in metrics),
         totalCompletionTokens=sum(m.completion_tokens for m in metrics),
         totalCachedTokens=sum(m.cached_tokens for m in metrics),
-        totalElapsedMs=total_elapsed,
-        avgElapsedMs=(total_elapsed / count) if count else 0.0,
+        totalElapsedSeconds=round(total_elapsed_seconds, 2),
+        avgElapsedSeconds=round(total_elapsed_seconds / count, 2) if count else 0.0,
     )
 
 

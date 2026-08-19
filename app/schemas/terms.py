@@ -71,8 +71,8 @@ class UsageSummary(BaseModel):
     totalPromptTokens: int
     totalCompletionTokens: int
     totalCachedTokens: int
-    totalElapsedMs: float
-    avgElapsedMs: float
+    totalElapsedSeconds: float
+    avgElapsedSeconds: float
 
 
 class TermsVerificationResult(BaseModel):
