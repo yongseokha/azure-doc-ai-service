@@ -243,16 +243,17 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
     return names_result, _aggregate_usage(list(metrics) + split_metrics)
 
 
-def _build_callback_body(request: TermsVerificationRequest, status_code: int, status_msg: str, result: TermsVerificationResult | None) -> dict:
+def _build_callback_body(
+    knwlg_info_id: int, term_vrf_seq: int, vrf_data_reslt_json: str | None, err_sbst: str | None
+) -> dict:
     return {
-        "userId": request.userId,
-        "infId": request.infId,
-        "rqtKey": request.rqtKey,
-        "knwlgInfoId": request.knwlgInfoId,
-        "termVrfSeq": request.termVrfSeq,
-        "statusCode": status_code,
-        "statusMsg": status_msg,
-        "data": [n.model_dump() for n in result.data] if result else None,
+        "data": {
+            "knwlgInfoId": knwlg_info_id,
+            "termVrfSeq": term_vrf_seq,
+            "vrfDataResltJson": vrf_data_reslt_json,
+            "errSbst": err_sbst,
+        },
+        "file": None,
     }
 
 
@@ -261,7 +262,9 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         names_result, usage = await _verify_all(request)
     except Exception as exc:
         await terms_job_service.mark_failed(request.rqtKey, str(exc))
-        body = _build_callback_body(request, 500, f"약관 검증 처리 중 오류가 발생했습니다: {exc}", None)
+        body = _build_callback_body(
+            request.knwlgInfoId, request.termVrfSeq, None, f"약관 검증 처리 중 오류가 발생했습니다: {exc}"
+        )
         callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
         await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
         return
@@ -273,7 +276,8 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     )
     await terms_job_service.mark_completed(request.rqtKey, result_path, usage)
 
-    body = _build_callback_body(request, 200, "OK", result)
+    vrf_data_reslt_json = json.dumps([n.model_dump() for n in result.data], ensure_ascii=False)
+    body = _build_callback_body(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None)
     callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
 
@@ -283,15 +287,11 @@ async def resend_stored_result(job: dict) -> None:
     content = await file_storage_service.download_file(job["result_file_path"])
     stored = json.loads(content.decode("utf-8"))
 
-    body = {
-        "userId": job["user_id"],
-        "infId": job["inf_id"],
-        "rqtKey": job["id"],
-        "knwlgInfoId": job.get("knwlg_info_id"),
-        "termVrfSeq": job.get("term_vrf_seq"),
-        "statusCode": 200,
-        "statusMsg": "OK",
-        "data": stored["data"],
-    }
+    body = _build_callback_body(
+        job.get("knwlg_info_id"),
+        job.get("term_vrf_seq"),
+        json.dumps(stored["data"], ensure_ascii=False),
+        None,
+    )
     callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(job["id"], callback_result.success, callback_result.message)
