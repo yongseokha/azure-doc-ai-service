@@ -19,7 +19,31 @@ RESULT_ROOT = "terms-verification"
 
 SYSTEM_PROMPT = (
     "당신은 약관 문서를 기준으로 상품 항목 데이터를 검증하는 어시스턴트입니다. "
-    "반드시 주어진 약관 원문 내용만을 근거로 판단하고, 원문에 없는 내용은 추측하지 마세요."
+    "반드시 주어진 약관 원문 내용만을 근거로 판단하고, 원문에 없는 내용은 추측하지 마세요.\n"
+    "itemNm이나 값이 약관 원문에 완전히 동일한 표현으로 나오지 않아도 괜찮습니다. 동의어·유사 표현·어순 차이 "
+    "등으로 표현만 다를 뿐 의미가 같다면 관련 내용/일치하는 것으로 인정하세요. '일치'는 문자 그대로 같은 "
+    "표현인지가 아니라 의미가 같은지를 기준으로 판단하세요.\n\n"
+    "아래 순서대로 하나씩 판단해서 필드를 채우세요. 뒤 단계는 앞 단계에서 채운 내용을 근거로 판단하세요.\n\n"
+    "1. llmValue: 약관 원문 전체(일반 원칙과 예외/단서 조항 모두 포함)를 검토해서 이 항목의 실제 값을 판단해 "
+    "채우세요.\n"
+    "   - 항목 설명(desc)이 있으면, 항목명(itemNm)이 정확히 무엇을 의미하는지 파악하는 데 참고하세요.\n"
+    "   - 현재 값이 없으면, 상품명+항목명을 기준으로 약관에서 값을 찾아 채우세요.\n"
+    "   - 약관에 이 항목에 대한 내용 자체가 없으면 null로 하세요.\n"
+    "2. evidence: 위에서 판단한 llmValue의 근거가 되는 문장을 약관 원문에서 생략·의역 없이 그대로 인용하세요. "
+    "근거가 되는 문장이 여러 곳에 있으면, llmValue를 가장 직접적으로 뒷받침하는 문장 하나만 인용하세요. "
+    "llmValue가 null이면 evidence도 null로 하세요.\n"
+    "3. page: evidence가 위치한 페이지 번호를 원문의 <!-- PageNumber=\"N\" --> 마커를 참고해 기입하세요. "
+    "evidence가 null이거나 페이지를 특정할 수 없으면 null로 하세요.\n"
+    "4. article: evidence가 위치한 약관 조항 번호(예: \"제3조\", \"제3조 2항\")가 원문에 표기되어 있으면 "
+    "기입하세요. evidence가 null이거나 조항을 특정할 수 없으면 null로 하세요.\n"
+    "5. reason: 현재 값과 llmValue가 다른 경우 그 차이를 설명하세요. 현재 값과 llmValue가 완전히 같으면 "
+    "null로 하세요.\n"
+    "6. status: 1~5에서 채운 내용을 종합해 다음 기준으로 최종 판정하세요. 세 상태는 서로 겹치지 않아야 합니다.\n"
+    "   - MATCHED: 현재 값이 있고 llmValue와 완전히 일치\n"
+    "   - PARTIAL_MATCH: 현재 값이 있고 llmValue와 일치하는 부분은 있지만 일부 조건/세부 수치 등이 달라 "
+    "완전히 일치하지는 않음\n"
+    "   - MISMATCH: 다음 중 하나 — (a) 현재 값이 있는데 llmValue와 일치하는 부분이 전혀 없음, "
+    "(b) 현재 값 자체가 없음, (c) llmValue가 null(약관에 이 항목에 대한 내용 자체가 없음)"
 )
 
 ITEM_VERIFICATION_SCHEMA = {
@@ -27,16 +51,20 @@ ITEM_VERIFICATION_SCHEMA = {
     "schema": {
         "type": "object",
         "properties": {
-            "status": {"type": "string", "enum": ["MATCHED", "MISMATCH", "EXTRACTED", "NOT_FOUND"]},
             "llmValue": {"type": ["string", "null"]},
             "evidence": {"type": ["string", "null"]},
             "page": {
                 "type": ["integer", "null"],
                 "description": "evidence가 위치한 페이지 번호 (원문의 PageNumber 마커 기준)",
             },
+            "article": {
+                "type": ["string", "null"],
+                "description": "evidence가 위치한 약관 조항 번호, 예: '제3조', '제3조 2항'. 특정할 수 없으면 null",
+            },
             "reason": {"type": ["string", "null"]},
+            "status": {"type": "string", "enum": ["MATCHED", "PARTIAL_MATCH", "MISMATCH"]},
         },
-        "required": ["status", "llmValue", "evidence", "page", "reason"],
+        "required": ["llmValue", "evidence", "page", "article", "reason", "status"],
         "additionalProperties": False,
     },
     "strict": True,
@@ -68,15 +96,7 @@ def _build_user_prompt(document_text: str, name: str, item: TermsItem, claim: st
         f"상품명: {name}\n"
         f"항목명: {item.itemNm}\n"
         f"항목 설명: {item.desc or '(없음)'}\n"
-        f"{value_section}\n\n"
-        "위 약관 원문을 근거로 이 항목을 판단하세요.\n"
-        "- 현재 값이 있고 약관 내용과 일치하면 status=MATCHED, llmValue는 현재 값과 동일하게 채우세요.\n"
-        "- 현재 값이 있는데 약관 내용과 다르면 status=MISMATCH, llmValue에 약관 기준 정정값을, reason에 차이를 설명하세요.\n"
-        "- 현재 값이 없고 약관에서 값을 찾았으면 status=EXTRACTED, llmValue에 추출한 값을 채우세요.\n"
-        "- 약관에 이 항목에 대한 내용 자체가 없으면 status=NOT_FOUND, llmValue는 null로 하세요.\n"
-        "evidence에는 판단 근거가 된 약관 원문 문장을 생략·의역 없이 그대로 인용하세요.\n"
-        "약관 원문에는 <!-- PageNumber=\"N\" --> 형태의 페이지 마커가 포함되어 있습니다. "
-        "evidence가 위치한 페이지 번호를 page 필드에 기입하세요. 특정할 수 없으면 null로 하세요."
+        f"{value_section}"
     )
 
 
@@ -120,6 +140,7 @@ async def _verify_one(
         llmValue=parsed.get("llmValue"),
         evidence=parsed.get("evidence"),
         page=parsed.get("page"),
+        article=parsed.get("article"),
         reason=parsed.get("reason"),
     )
     return result, completion
