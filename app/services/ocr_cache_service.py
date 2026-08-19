@@ -4,7 +4,6 @@ import json
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from app.core.config import settings
 from app.exceptions.handlers import DocumentIntelligenceError, DocumentNotFoundError, DocumentNotReadyError
@@ -23,11 +22,6 @@ def _build_cache_key(content_hash: str) -> str:
 
 
 CACHE_ROOT = "cache"
-
-
-def _build_original_path(content_hash: str, filename: str) -> str:
-    extension = Path(filename).suffix
-    return f"{CACHE_ROOT}/{content_hash[:2]}/{content_hash}/original{extension}"
 
 
 def _build_result_path(content_hash: str) -> str:
@@ -157,24 +151,18 @@ async def _send_di_callback(
 async def process_and_store(
     cache_key: str,
     content_hash: str,
-    filename: str,
     content: bytes,
-    content_type: str | None,
-    existing_file_path: str | None,
+    file_path: str,
     term_id: str,
     term_hst_seq: str,
     file_div_cd: str,
 ) -> None:
     """실제 OCR 처리를 수행하고 결과를 저장한다. 백그라운드 태스크로 실행되므로
     호출자에게 반환할 응답이 없고, 성공/실패 여부는 상태 저장소에 기록되며 콜백으로도 전송된다."""
-    original_path = existing_file_path or _build_original_path(content_hash, filename)
     result_path = _build_result_path(content_hash)
     result_json_path = _build_result_json_path(content_hash)
 
     try:
-        if existing_file_path is None:
-            await file_storage_service.upload_file(original_path, content, content_type=content_type)
-
         started_at = time.monotonic()
         result = await document_intelligence_service.analyze_document(content, model_id=DEFAULT_MODEL_ID)
         processing_duration_seconds = time.monotonic() - started_at
@@ -189,7 +177,7 @@ async def process_and_store(
             {
                 "id": cache_key,
                 "status": "completed",
-                "original_file_path": original_path,
+                "original_file_path": file_path,
                 "result_file_path": result_path,
                 "result_json_path": result_json_path,
                 "char_count": len(text),
