@@ -59,6 +59,7 @@ def _build_index() -> SearchIndex:
             SimpleField(name="total_elapsed_seconds", type=SearchFieldDataType.Double),
             SimpleField(name="avg_elapsed_seconds", type=SearchFieldDataType.Double),
             SimpleField(name="result_file_path", type=SearchFieldDataType.String),
+            SimpleField(name="report_file_path", type=SearchFieldDataType.String),
             SimpleField(name="knwlg_info_id", type=SearchFieldDataType.Int64),
             SimpleField(name="term_vrf_seq", type=SearchFieldDataType.Int32),
             SimpleField(name="callback_status", type=SearchFieldDataType.String),
@@ -126,12 +127,13 @@ async def claim_job(request: TermsVerificationRequest) -> None:
     )
 
 
-async def mark_completed(rqt_key: str, result_file_path: str, usage: UsageSummary) -> None:
+async def mark_completed(rqt_key: str, result_file_path: str, report_file_path: str, usage: UsageSummary) -> None:
     await _merge_or_upload(
         {
             "id": rqt_key,
             "status": "completed",
             "result_file_path": result_file_path,
+            "report_file_path": report_file_path,
             "model": usage.model,
             "total_prompt_tokens": usage.totalPromptTokens,
             "total_completion_tokens": usage.totalCompletionTokens,

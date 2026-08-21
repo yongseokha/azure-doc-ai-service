@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 
 from app.core.config import settings
@@ -12,7 +13,14 @@ from app.schemas.terms import (
     TermsVerificationResult,
     UsageSummary,
 )
-from app.services import azure_openai_service, callback_service, file_storage_service, ocr_cache_service, terms_job_service
+from app.services import (
+    azure_openai_service,
+    callback_service,
+    file_storage_service,
+    ocr_cache_service,
+    report_service,
+    terms_job_service,
+)
 from app.services.azure_openai_service import StructuredCompletion
 
 RESULT_ROOT = "terms-verification"
@@ -245,7 +253,11 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
 
 
 def _build_callback_body(
-    knwlg_info_id: int, term_vrf_seq: int, vrf_data_reslt_json: str | None, err_sbst: str | None
+    knwlg_info_id: int,
+    term_vrf_seq: int,
+    vrf_data_reslt_json: str | None,
+    err_sbst: str | None,
+    file_b64: str | None = None,
 ) -> dict:
     return {
         "data": {
@@ -254,7 +266,7 @@ def _build_callback_body(
             "vrfDataResltJson": vrf_data_reslt_json,
             "errSbst": err_sbst,
         },
-        "file": None,
+        "file": file_b64,
     }
 
 
@@ -275,24 +287,41 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     await file_storage_service.upload_file(
         result_path, result.model_dump_json().encode("utf-8"), content_type="application/json"
     )
-    await terms_job_service.mark_completed(request.rqtKey, result_path, usage)
+
+    report_bytes = await asyncio.to_thread(report_service.build_report_xlsx, result)
+    report_path = f"{RESULT_ROOT}/{request.rqtKey}/report.xlsx"
+    await file_storage_service.upload_file(
+        report_path,
+        report_bytes,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    await terms_job_service.mark_completed(request.rqtKey, result_path, report_path, usage)
 
     vrf_data_reslt_json = json.dumps([n.model_dump() for n in result.data], ensure_ascii=False)
-    body = _build_callback_body(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None)
+    file_b64 = base64.b64encode(report_bytes).decode("ascii")
+    body = _build_callback_body(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None, file_b64)
     callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
 
 
 async def resend_stored_result(job: dict) -> None:
-    """재검증 없이, 이미 완료된 job의 저장된 결과를 그대로 다시 콜백으로 전송한다."""
+    """재검증 없이, 이미 완료된 job의 저장된 결과(및 리포트)를 그대로 다시 콜백으로 전송한다."""
     content = await file_storage_service.download_file(job["result_file_path"])
     stored = json.loads(content.decode("utf-8"))
+
+    file_b64 = None
+    report_path = job.get("report_file_path")
+    if report_path:
+        report_bytes = await file_storage_service.download_file(report_path)
+        file_b64 = base64.b64encode(report_bytes).decode("ascii")
 
     body = _build_callback_body(
         job.get("knwlg_info_id"),
         job.get("term_vrf_seq"),
         json.dumps(stored["data"], ensure_ascii=False),
         None,
+        file_b64,
     )
     callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(job["id"], callback_result.success, callback_result.message)
