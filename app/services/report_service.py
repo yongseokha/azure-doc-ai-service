@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from app.schemas.terms import TermsVerificationResult
@@ -11,6 +11,13 @@ from app.schemas.terms import TermsVerificationResult
 ITEM_COLUMNS = ["itemNm", "value", "subClaim", "evidence", "page", "article", "reason", "status"]
 STATUS_ORDER = ["MATCHED", "PARTIAL_MATCH", "MISMATCH"]
 STATUS_LABELS = {"MATCHED": "일치", "PARTIAL_MATCH": "부분 일치", "MISMATCH": "불일치"}
+HEADER_FILL_COLOR = "0000A5"
+HEADER_FONT_COLOR = "FFFFFF"
+STATUS_STYLE = {
+    "일치": {"fill": "C6EFCE", "font": "006100"},
+    "부분 일치": {"fill": "FFEB9C", "font": "9C6500"},
+    "불일치": {"fill": "FFC7CE", "font": "9C0006"},
+}
 COLUMN_LABELS = {
     "name": "대상명",
     "termNm": "약관명",
@@ -25,6 +32,22 @@ COLUMN_LABELS = {
 }
 WRAP_COLUMNS = {"evidence", "reason"}
 COLUMN_WIDTHS = [22, 22, 22, 50, 8, 16, 40, 14]
+MAX_COL = len(COLUMN_WIDTHS)
+
+_THIN_SIDE = Side(style="thin", color="B7B7B7")
+BOX_BORDER = Border(left=_THIN_SIDE, right=_THIN_SIDE, top=_THIN_SIDE, bottom=_THIN_SIDE)
+
+TITLE_FILL = PatternFill(start_color="375623", end_color="375623", fill_type="solid")
+TITLE_FONT = Font(bold=True, size=16, color="FFFFFF")
+BANNER_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+BANNER_FONT = Font(bold=True, size=13, color="375623")
+STATS_HEADER_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+ZEBRA_FILL = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+CARD_STYLES = {
+    "total": {"fill": "EDEDED", "font": "404040"},
+    "matched": {"fill": "E2EFDA", "font": "375623"},
+    "mismatch": {"fill": "FCE4EC", "font": "9C0006"},
+}
 
 
 def _flatten(result: TermsVerificationResult) -> pd.DataFrame:
@@ -61,8 +84,28 @@ def _build_item_row(item) -> dict:
     return row
 
 
+def _write_title(ws, row: int) -> int:
+    ws.cell(row=row, column=1, value="상품지식-약관 검증 AI 결과 보고서")
+    for col_idx in range(1, MAX_COL + 1):
+        cell = ws.cell(row=row, column=col_idx)
+        cell.fill = TITLE_FILL
+        cell.border = BOX_BORDER
+    title_cell = ws.cell(row=row, column=1)
+    title_cell.font = TITLE_FONT
+    title_cell.alignment = Alignment(horizontal="left", vertical="center")
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=MAX_COL)
+    ws.row_dimensions[row].height = 28
+    return row + 2
+
+
 def _write_section_title(ws, row: int, title: str) -> int:
-    ws.cell(row=row, column=1, value=title).font = Font(bold=True, size=14)
+    ws.cell(row=row, column=1, value=title)
+    for col_idx in range(1, MAX_COL + 1):
+        cell = ws.cell(row=row, column=col_idx)
+        cell.fill = BANNER_FILL
+        cell.border = BOX_BORDER
+    ws.cell(row=row, column=1).font = BANNER_FONT
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=MAX_COL)
     return row + 1
 
 
@@ -94,29 +137,56 @@ def _merge_consecutive_rows(ws, col_idx: int, start_row: int, run_ids: list[int]
 
 
 def _write_table(
-    ws, df: pd.DataFrame, start_row: int, title: str | None = None, merge_columns: frozenset = frozenset()
+    ws,
+    df: pd.DataFrame,
+    start_row: int,
+    title: str | None = None,
+    merge_columns: frozenset = frozenset(),
+    highlight_header: bool = False,
+    status_column: str | None = None,
+    bold_columns: frozenset = frozenset(),
 ) -> int:
     row = start_row
     if title:
-        ws.cell(row=row, column=1, value=title).font = Font(bold=True, size=12)
+        title_cell = ws.cell(row=row, column=1, value=title)
+        title_cell.font = Font(bold=True, size=12)
+        for col_idx in range(1, MAX_COL + 1):
+            ws.cell(row=row, column=col_idx).border = BOX_BORDER
         row += 1
 
     if df.empty:
-        ws.cell(row=row, column=1, value="(데이터 없음)")
+        ws.cell(row=row, column=1, value="(데이터 없음)").border = BOX_BORDER
         return row + 2
 
+    header_font = Font(bold=True, color=HEADER_FONT_COLOR) if highlight_header else Font(bold=True)
+    header_fill = PatternFill(start_color=HEADER_FILL_COLOR, end_color=HEADER_FILL_COLOR, fill_type="solid")
     for col_idx, col_name in enumerate(df.columns, start=1):
         header = COLUMN_LABELS.get(col_name, str(col_name))
-        ws.cell(row=row, column=col_idx, value=header).font = Font(bold=True)
+        cell = ws.cell(row=row, column=col_idx, value=header)
+        cell.font = header_font
+        cell.border = BOX_BORDER
+        cell.alignment = Alignment(horizontal="center")
+        cell.fill = header_fill if highlight_header else STATS_HEADER_FILL
     row += 1
     data_start_row = row
 
-    for _, record in df.iterrows():
+    for row_idx, (_, record) in enumerate(df.iterrows()):
+        zebra = row_idx % 2 == 1
         for col_idx, col_name in enumerate(df.columns, start=1):
             value = record[col_name]
             cell = ws.cell(row=row, column=col_idx, value=None if pd.isna(value) else value)
+            cell.border = BOX_BORDER
             if col_name in WRAP_COLUMNS:
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
+            if col_name == status_column and value in STATUS_STYLE:
+                style = STATUS_STYLE[value]
+                cell.fill = PatternFill(start_color=style["fill"], end_color=style["fill"], fill_type="solid")
+                cell.font = Font(bold=True, color=style["font"])
+                cell.alignment = Alignment(horizontal="center")
+            elif col_name in bold_columns:
+                cell.font = Font(bold=True)
+            elif zebra:
+                cell.fill = ZEBRA_FILL
         row += 1
 
     active_merge_cols = [col for col in df.columns if col in merge_columns]
@@ -140,13 +210,19 @@ def _write_overview(ws, result: TermsVerificationResult, start_row: int) -> int:
         )
     )
 
+    label_fill = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
     for label, value in [
         ("검증 일시", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         ("대상 상품지식", ", ".join(names)),
         ("매핑약관", ", ".join(docs)),
     ]:
-        ws.cell(row=row, column=1, value=label).font = Font(bold=True)
-        ws.cell(row=row, column=2, value=value)
+        label_cell = ws.cell(row=row, column=1, value=label)
+        label_cell.font = Font(bold=True)
+        label_cell.fill = label_fill
+        label_cell.border = BOX_BORDER
+        ws.cell(row=row, column=2, value=value).border = BOX_BORDER
+        for col_idx in range(3, MAX_COL + 1):
+            ws.cell(row=row, column=col_idx).border = BOX_BORDER
         row += 1
 
     return row + 1
@@ -161,23 +237,43 @@ def _write_summary_dashboard(ws, df: pd.DataFrame, start_row: int) -> int:
     mismatch = int(counts.get("MISMATCH", 0))
     total = matched + partial + mismatch
 
-    headers = ["총 검증 항목", "일치/부분일치", "불일치"]
-    values = [f"{total} 건", f"{matched}/{partial}", f"{mismatch} 건"]
+    cards = [
+        ("총 검증 항목", f"{total} 건", "total"),
+        ("일치 / 부분일치", f"{matched} / {partial}", "matched"),
+        ("불일치", f"{mismatch} 건", "mismatch"),
+    ]
 
-    for col_idx, header in enumerate(headers, start=1):
-        ws.cell(row=row, column=col_idx, value=header).font = Font(bold=True)
-    row += 1
-    for col_idx, value in enumerate(values, start=1):
-        ws.cell(row=row, column=col_idx, value=value)
-    row += 1
+    label_row, value_row = row, row + 1
+    for col_idx, (label, value, style_key) in enumerate(cards, start=1):
+        style = CARD_STYLES[style_key]
+        fill = PatternFill(start_color=style["fill"], end_color=style["fill"], fill_type="solid")
 
-    return row + 1
+        label_cell = ws.cell(row=label_row, column=col_idx, value=label)
+        label_cell.font = Font(bold=True, size=11, color=style["font"])
+        label_cell.fill = fill
+        label_cell.border = BOX_BORDER
+        label_cell.alignment = Alignment(horizontal="center")
+
+        value_cell = ws.cell(row=value_row, column=col_idx, value=value)
+        value_cell.font = Font(bold=True, size=20, color=style["font"])
+        value_cell.fill = fill
+        value_cell.border = BOX_BORDER
+        value_cell.alignment = Alignment(horizontal="center")
+
+    ws.row_dimensions[value_row].height = 32
+    for col_idx in range(len(cards) + 1, MAX_COL + 1):
+        ws.cell(row=label_row, column=col_idx).border = BOX_BORDER
+        ws.cell(row=value_row, column=col_idx).border = BOX_BORDER
+
+    return value_row + 2
 
 
 def _write_detailed_stats(ws, df: pd.DataFrame, start_row: int) -> int:
     row = _write_section_title(ws, start_row, "3. 상세 통계")
-    row = _write_table(ws, _grouped_stats(df, ["name"]), row, "상품명별 통계")
-    row = _write_table(ws, _grouped_stats(df, ["name", "termNm"]), row, "문서별 통계")
+    row = _write_table(ws, _grouped_stats(df, ["name"]), row, "상품명별 통계", bold_columns=frozenset({"name"}))
+    row = _write_table(
+        ws, _grouped_stats(df, ["name", "termNm"]), row, "문서별 통계", bold_columns=frozenset({"name"})
+    )
     return row
 
 
@@ -190,15 +286,22 @@ def _write_item_detail(ws, result: TermsVerificationResult, start_row: int) -> i
                 columns=ITEM_COLUMNS,
             )
             row = _write_table(
-                ws, item_df, row, f"{name_result.name} - {doc_result.termNm}", merge_columns=frozenset({"itemNm", "value"})
+                ws,
+                item_df,
+                row,
+                f"{name_result.name} - {doc_result.termNm}",
+                merge_columns=frozenset({"itemNm", "value"}),
+                highlight_header=True,
+                status_column="status",
+                bold_columns=frozenset({"itemNm"}),
             )
     return row
 
 
 def build_report_xlsx(result: TermsVerificationResult) -> bytes:
-    """검증 결과를 하나의 시트에 1.개요 -> 2.검증 요약 대시보드 -> 3.상세 통계 -> 4.항목별 상세
-    비교 결과 순서로 담은 xlsx를 만든다. 4번은 (name, 문서) 조합별 표를 상품명 -> 문서 순서로
-    수직 나열한다.
+    """검증 결과를 하나의 시트에 제목 -> 1.개요 -> 2.검증 요약 대시보드 -> 3.상세 통계 ->
+    4.항목별 상세 비교 결과 순서로 담은 xlsx를 만든다. 4번은 (name, 문서) 조합별 표를
+    상품명 -> 문서 순서로 수직 나열한다.
     """
     df = _flatten(result)
 
@@ -207,6 +310,7 @@ def build_report_xlsx(result: TermsVerificationResult) -> bytes:
     ws.title = "약관비교 결과"
 
     row = 1
+    row = _write_title(ws, row)
     row = _write_overview(ws, result, row)
     row = _write_summary_dashboard(ws, df, row)
     row = _write_detailed_stats(ws, df, row)
