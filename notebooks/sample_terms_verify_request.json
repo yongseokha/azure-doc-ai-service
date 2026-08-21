@@ -1,0 +1,30 @@
+{
+  "userId": "EMP0001",
+  "infId": "IF-TERMS-VERIFY-001",
+  "rqtKey": "test-req-0001",
+  "termInfo": [
+    {
+      "ocrResltKey": "여기에 실제 parse-di로 처리 완료된 문서의 ocrResltKey(문서 해시)를 넣으세요",
+      "termNm": "KT 요고 시리즈 이용약관"
+    }
+  ],
+  "data": [
+    {
+      "name": "요고 69",
+      "items": [
+        {
+          "itemNm": "초이스 상품여부",
+          "value": "Y",
+          "desc": "선택형 상품 여부"
+        },
+        {
+          "itemNm": "환불 가능 기간",
+          "value": null,
+          "desc": "값 없이 추출 테스트용"
+        }
+      ]
+    }
+  ],
+  "knwlgInfoId": 123456789012,
+  "termVrfSeq": 1
+}
