@@ -132,7 +132,7 @@ async def _reclaim(cache_key: str) -> None:
 
 
 async def _send_di_callback(
-    term_id: str, term_hst_seq: str, file_div_cd: str, ocr_reslt_key: str | None, ocr_err_sbst: str | None
+    term_id: int, term_hst_seq: int, file_div_cd: str, ocr_reslt_key: str | None, ocr_err_sbst: str | None
 ) -> None:
     body = {
         "termId": term_id,
@@ -153,8 +153,8 @@ async def process_and_store(
     content_hash: str,
     content: bytes,
     file_path: str,
-    term_id: str,
-    term_hst_seq: str,
+    term_id: int,
+    term_hst_seq: int,
     file_div_cd: str,
 ) -> None:
     """실제 OCR 처리를 수행하고 결과를 저장한다. 백그라운드 태스크로 실행되므로

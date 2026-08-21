@@ -6,8 +6,8 @@ from app.schemas.base import ApiRequest
 
 
 class ParseDiRequest(ApiRequest):
-    termId: str = Field(default="", description="약관 ID", examples=["T12345"])
-    termHstSeq: str = Field(default="", description="약관 이력 순번", examples=["1"])
+    termId: int = Field(default=0, description="약관 ID", examples=[12345])
+    termHstSeq: int = Field(default=0, description="약관 이력 순번", examples=[1])
     fileDivCd: str = Field(default="", description="파일 구분 코드", examples=["01"])
     filePath: str = Field(description="Azure File Storage 내 문서 경로", examples=["uploads/2026-07/계약서.pdf"])
 
