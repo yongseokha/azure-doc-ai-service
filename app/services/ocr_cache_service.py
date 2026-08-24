@@ -25,11 +25,11 @@ CACHE_ROOT = "cache"
 
 
 def _build_result_path(content_hash: str) -> str:
-    return f"{CACHE_ROOT}/{content_hash[:2]}/{content_hash}/result.md"
+    return f"{CACHE_ROOT}/{content_hash}/result.md"
 
 
 def _build_result_json_path(content_hash: str) -> str:
-    return f"{CACHE_ROOT}/{content_hash[:2]}/{content_hash}/result.json"
+    return f"{CACHE_ROOT}/{content_hash}/result.json"
 
 
 def _now_iso() -> str:
