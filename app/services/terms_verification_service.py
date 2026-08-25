@@ -25,6 +25,10 @@ from app.services.azure_openai_service import StructuredCompletion
 
 RESULT_ROOT = "terms-verification"
 
+# job이 여러 개 동시에 들어와도 Azure OpenAI 호출은 한 번에 한 job씩만 나가도록 직렬화한다.
+# (job마다 세마포어를 따로 두면 job 수만큼 동시 호출이 배로 늘어나 rate limit에 취약해진다.)
+_job_lock = asyncio.Lock()
+
 SYSTEM_PROMPT = (
     "당신은 약관 문서를 기준으로 상품 항목 데이터를 검증하는 어시스턴트입니다. "
     "반드시 주어진 약관 원문 내용만을 근거로 판단하고, 원문에 없는 내용은 추측하지 마세요.\n"
@@ -238,11 +242,21 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
         (name, ref.ocrResltKey, item, claim) for name, item, claim in claim_entries for ref in unique_refs
     ]
 
+    total_calls = len(calls)
+    progress_step = max(1, total_calls // 20)  # 전체 구간에서 약 20번만 업데이트하도록 스로틀
+    done_count = 0
+    await terms_job_service.update_progress(request.rqtKey, 0, total_calls)
+
     async def _bounded_verify(
         name: str, hash_key: str, item: TermsItem, claim: str | None
     ) -> tuple[TermsItemResult, StructuredCompletion]:
+        nonlocal done_count
         async with semaphore:
-            return await _verify_one(name, item, claim, text_by_hash[hash_key])
+            result = await _verify_one(name, item, claim, text_by_hash[hash_key])
+        done_count += 1
+        if done_count % progress_step == 0 or done_count == total_calls:
+            await terms_job_service.update_progress(request.rqtKey, done_count, total_calls)
+        return result
 
     tasks = [asyncio.create_task(_bounded_verify(*call)) for call in calls]
     outcomes = await _run_bounded(tasks)
@@ -272,7 +286,8 @@ def _build_callback_body(
 
 async def process_and_callback(request: TermsVerificationRequest) -> None:
     try:
-        names_result, usage = await _verify_all(request)
+        async with _job_lock:
+            names_result, usage = await _verify_all(request)
     except Exception as exc:
         await terms_job_service.mark_failed(request.rqtKey, str(exc))
         body = _build_callback_body(

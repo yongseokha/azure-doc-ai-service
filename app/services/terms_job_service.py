@@ -48,6 +48,8 @@ def _build_index() -> SearchIndex:
             SimpleField(name="user_id", type=SearchFieldDataType.String),
             SimpleField(name="inf_id", type=SearchFieldDataType.String),
             SimpleField(name="status", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="progress_done", type=SearchFieldDataType.Int32),
+            SimpleField(name="progress_total", type=SearchFieldDataType.Int32),
             SimpleField(name="document_count", type=SearchFieldDataType.Int32),
             SimpleField(name="names_count", type=SearchFieldDataType.Int32),
             SimpleField(name="item_count", type=SearchFieldDataType.Int32),
@@ -121,6 +123,8 @@ async def claim_job(request: TermsVerificationRequest) -> None:
             "user_id": request.userId,
             "inf_id": request.infId,
             "status": "processing",
+            "progress_done": None,
+            "progress_total": None,
             "document_count": len(request.termInfo),
             "names_count": len(request.data),
             "item_count": item_count,
@@ -162,6 +166,17 @@ async def mark_failed(rqt_key: str, error_message: str) -> None:
             "error_message": error_message,
             "updated_at": _now_iso(),
             "completed_at": _now_iso(),
+        }
+    )
+
+
+async def update_progress(rqt_key: str, done: int, total: int) -> None:
+    await _merge_or_upload(
+        {
+            "id": rqt_key,
+            "progress_done": done,
+            "progress_total": total,
+            "updated_at": _now_iso(),
         }
     )
 

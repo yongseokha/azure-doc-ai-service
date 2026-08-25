@@ -66,7 +66,12 @@ async def get_verification_status(rqtKey: str) -> ApiResponse[dict]:
     return ApiResponse[dict](
         statusCode=200,
         statusMsg="OK",
-        result={"status": job["status"], "errorMessage": job.get("error_message")},
+        result={
+            "status": job["status"],
+            "progressDone": job.get("progress_done"),
+            "progressTotal": job.get("progress_total"),
+            "errorMessage": job.get("error_message"),
+        },
     )
 
 
