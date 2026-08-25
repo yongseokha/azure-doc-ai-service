@@ -75,9 +75,16 @@ def _build_index() -> SearchIndex:
 async def ensure_index_exists() -> None:
     index_client = get_index_client()
     try:
-        await index_client.get_index(settings.azure_search_terms_index_name)
+        existing_index = await index_client.get_index(settings.azure_search_terms_index_name)
     except ResourceNotFoundError:
         await index_client.create_index(_build_index())
+        return
+
+    existing_field_names = {field.name for field in existing_index.fields}
+    new_fields = [field for field in _build_index().fields if field.name not in existing_field_names]
+    if new_fields:
+        existing_index.fields.extend(new_fields)
+        await index_client.create_or_update_index(existing_index)
 
 
 def _now_iso() -> str:
