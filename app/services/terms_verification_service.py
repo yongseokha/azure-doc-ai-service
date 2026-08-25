@@ -314,7 +314,7 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         {
             "verifiedAt": verified_at,
             **overview_stats,
-            "items": [n.model_dump() for n in result.data],
+            "data": [n.model_dump() for n in result.data],
         },
         ensure_ascii=False,
     )
@@ -349,7 +349,7 @@ async def resend_stored_result(job: dict) -> None:
         {
             "verifiedAt": verified_at,
             **overview_stats,
-            "items": stored["data"],
+            "data": stored["data"],
         },
         ensure_ascii=False,
     )
