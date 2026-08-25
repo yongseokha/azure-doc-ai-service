@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import textwrap
+from datetime import datetime
 
 from app.core.config import settings
 from app.schemas.terms import (
@@ -295,7 +296,11 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         result_path, result.model_dump_json().encode("utf-8"), content_type="application/json"
     )
 
-    report_bytes = await asyncio.to_thread(report_service.build_report_xlsx, result)
+    # 리포트(엑셀)와 콜백 JSON이 같은 검증 일시/통계를 쓰도록 여기서 한 번만 계산해서 넘긴다.
+    verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    overview_stats = report_service.compute_overview_stats(result)
+
+    report_bytes = await asyncio.to_thread(report_service.build_report_xlsx, result, verified_at)
     report_path = f"{RESULT_ROOT}/{request.rqtKey}/report.xlsx"
     await file_storage_service.upload_file(
         report_path,
@@ -305,7 +310,14 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
 
     await terms_job_service.mark_completed(request.rqtKey, result_path, report_path, usage)
 
-    vrf_data_reslt_json = json.dumps([n.model_dump() for n in result.data], ensure_ascii=False)
+    vrf_data_reslt_json = json.dumps(
+        {
+            "verifiedAt": verified_at,
+            **overview_stats,
+            "items": [n.model_dump() for n in result.data],
+        },
+        ensure_ascii=False,
+    )
     file_b64 = base64.b64encode(report_bytes).decode("ascii")
     body = _build_callback_body(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None, file_b64)
     callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
@@ -316,6 +328,16 @@ async def resend_stored_result(job: dict) -> None:
     """재검증 없이, 이미 완료된 job의 저장된 결과(및 리포트)를 그대로 다시 콜백으로 전송한다."""
     content = await file_storage_service.download_file(job["result_file_path"])
     stored = json.loads(content.decode("utf-8"))
+    result = TermsVerificationResult.model_validate(stored)
+
+    completed_at = job.get("completed_at")
+    if isinstance(completed_at, datetime):
+        verified_at = completed_at.strftime("%Y-%m-%d %H:%M:%S")
+    elif isinstance(completed_at, str) and completed_at:
+        verified_at = completed_at
+    else:
+        verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    overview_stats = report_service.compute_overview_stats(result)
 
     file_b64 = None
     report_path = job.get("report_file_path")
@@ -323,10 +345,18 @@ async def resend_stored_result(job: dict) -> None:
         report_bytes = await file_storage_service.download_file(report_path)
         file_b64 = base64.b64encode(report_bytes).decode("ascii")
 
+    vrf_data_reslt_json = json.dumps(
+        {
+            "verifiedAt": verified_at,
+            **overview_stats,
+            "items": stored["data"],
+        },
+        ensure_ascii=False,
+    )
     body = _build_callback_body(
         job.get("knwlg_info_id"),
         job.get("term_vrf_seq"),
-        json.dumps(stored["data"], ensure_ascii=False),
+        vrf_data_reslt_json,
         None,
         file_b64,
     )

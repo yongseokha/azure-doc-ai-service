@@ -84,6 +84,28 @@ def _build_item_row(item) -> dict:
     return row
 
 
+def compute_overview_stats(result: TermsVerificationResult) -> dict:
+    """전체 항목 수, status별 건수, 종합 판정을 계산한다.
+
+    엑셀 리포트의 검증 요약 대시보드와 콜백의 vrfDataResltJson이 같은 숫자를 쓰도록
+    양쪽에서 공유하는 함수다.
+    """
+    counts = dict.fromkeys(STATUS_ORDER, 0)
+    for name_result in result.data:
+        for doc_result in name_result.documents:
+            for item in doc_result.items:
+                counts[item.status] = counts.get(item.status, 0) + 1
+    total = sum(counts.values())
+    overall_result = "약관 개정 필요" if counts["MISMATCH"] > 0 else "약관 개정 불필요"
+    return {
+        "totalCnt": total,
+        "matchedCnt": counts["MATCHED"],
+        "partialMatchCnt": counts["PARTIAL_MATCH"],
+        "mismatchCnt": counts["MISMATCH"],
+        "overallResult": overall_result,
+    }
+
+
 def _write_title(ws, row: int) -> int:
     ws.cell(row=row, column=1, value="상품지식-약관 검증 AI 결과 보고서")
     for col_idx in range(1, MAX_COL + 1):
@@ -200,7 +222,7 @@ def _write_table(
     return row + 1
 
 
-def _write_overview(ws, result: TermsVerificationResult, start_row: int) -> int:
+def _write_overview(ws, result: TermsVerificationResult, start_row: int, verified_at: str) -> int:
     row = _write_section_title(ws, start_row, "1. 개요")
 
     names = list(dict.fromkeys(name_result.name for name_result in result.data))
@@ -212,7 +234,7 @@ def _write_overview(ws, result: TermsVerificationResult, start_row: int) -> int:
 
     label_fill = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
     for label, value in [
-        ("검증 일시", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        ("검증 일시", verified_at),
         ("대상 상품지식", ", ".join(names)),
         ("매핑약관", ", ".join(docs)),
     ]:
@@ -228,19 +250,13 @@ def _write_overview(ws, result: TermsVerificationResult, start_row: int) -> int:
     return row + 1
 
 
-def _write_summary_dashboard(ws, df: pd.DataFrame, start_row: int) -> int:
+def _write_summary_dashboard(ws, stats: dict, start_row: int) -> int:
     row = _write_section_title(ws, start_row, "2. 검증 요약 대시보드")
 
-    counts = df["status"].value_counts() if not df.empty else pd.Series(dtype=int)
-    matched = int(counts.get("MATCHED", 0))
-    partial = int(counts.get("PARTIAL_MATCH", 0))
-    mismatch = int(counts.get("MISMATCH", 0))
-    total = matched + partial + mismatch
-
     cards = [
-        ("총 검증 항목", f"{total} 건", "total"),
-        ("일치 / 부분일치", f"{matched} / {partial}", "matched"),
-        ("불일치", f"{mismatch} 건", "mismatch"),
+        ("총 검증 항목", f"{stats['totalCnt']} 건", "total"),
+        ("일치 / 부분일치", f"{stats['matchedCnt']} / {stats['partialMatchCnt']}", "matched"),
+        ("불일치", f"{stats['mismatchCnt']} 건", "mismatch"),
     ]
 
     label_row, value_row = row, row + 1
@@ -298,12 +314,17 @@ def _write_item_detail(ws, result: TermsVerificationResult, start_row: int) -> i
     return row
 
 
-def build_report_xlsx(result: TermsVerificationResult) -> bytes:
+def build_report_xlsx(result: TermsVerificationResult, verified_at: str | None = None) -> bytes:
     """검증 결과를 하나의 시트에 제목 -> 1.개요 -> 2.검증 요약 대시보드 -> 3.상세 통계 ->
     4.항목별 상세 비교 결과 순서로 담은 xlsx를 만든다. 4번은 (name, 문서) 조합별 표를
     상품명 -> 문서 순서로 수직 나열한다.
+
+    verified_at을 안 넘기면 호출 시점 시각을 쓴다 - 콜백 JSON(vrfDataResltJson)의
+    verifiedAt과 같은 값을 쓰고 싶으면 호출하는 쪽에서 계산해서 넘겨야 한다.
     """
+    verified_at = verified_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     df = _flatten(result)
+    stats = compute_overview_stats(result)
 
     wb = Workbook()
     ws = wb.active
@@ -311,8 +332,8 @@ def build_report_xlsx(result: TermsVerificationResult) -> bytes:
 
     row = 1
     row = _write_title(ws, row)
-    row = _write_overview(ws, result, row)
-    row = _write_summary_dashboard(ws, df, row)
+    row = _write_overview(ws, result, row, verified_at)
+    row = _write_summary_dashboard(ws, stats, row)
     row = _write_detailed_stats(ws, df, row)
     _write_item_detail(ws, result, row)
 
