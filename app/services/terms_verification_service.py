@@ -262,19 +262,18 @@ REPORT_FILENAME = "report.xlsx"
 REPORT_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-def _build_callback_fields(
+def _build_callback_data(
     knwlg_info_id: int | None,
     term_vrf_seq: int | None,
     vrf_data_reslt_json: str | None,
     err_sbst: str | None,
-) -> dict[str, str]:
-    """multipart/form-data로 나갈 텍스트 파트 4개. 항상 이 4개 키가 다 존재하고,
-    값이 없으면 빈 문자열로 채운다 (multipart엔 JSON null 개념이 없음)."""
+) -> dict:
+    """multipart의 data 파트 안에 중첩될 내용. file만 최상단에 남고 나머지는 전부 이 안에 들어간다."""
     return {
-        "knwlgInfoId": str(knwlg_info_id) if knwlg_info_id is not None else "",
-        "termVrfSeq": str(term_vrf_seq) if term_vrf_seq is not None else "",
-        "vrfDataResltJson": vrf_data_reslt_json or "",
-        "errSbst": err_sbst or "",
+        "knwlgInfoId": knwlg_info_id,
+        "termVrfSeq": term_vrf_seq,
+        "vrfDataResltJson": vrf_data_reslt_json,
+        "errSbst": err_sbst,
     }
 
 
@@ -284,11 +283,11 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
             names_result, usage = await _verify_all(request)
     except Exception as exc:
         await terms_job_service.mark_failed(request.rqtKey, str(exc))
-        fields = _build_callback_fields(
+        data = _build_callback_data(
             request.knwlgInfoId, request.termVrfSeq, None, f"약관 검증 처리 중 오류가 발생했습니다: {exc}"
         )
         callback_result = await callback_service.send_callback_multipart(
-            settings.terms_verification_callback_url, fields
+            settings.terms_verification_callback_url, data
         )
         await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
         return
@@ -321,10 +320,10 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         },
         ensure_ascii=False,
     )
-    fields = _build_callback_fields(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None)
+    data = _build_callback_data(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None)
     file_part = (REPORT_FILENAME, report_bytes, REPORT_CONTENT_TYPE)
     callback_result = await callback_service.send_callback_multipart(
-        settings.terms_verification_callback_url, fields, file_part
+        settings.terms_verification_callback_url, data, file_part
     )
     await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
 
@@ -366,8 +365,8 @@ async def resend_stored_result(job: dict) -> None:
         file_part = (REPORT_FILENAME, report_bytes, REPORT_CONTENT_TYPE)
 
     vrf_data_reslt_json = json.dumps(summary, ensure_ascii=False)
-    fields = _build_callback_fields(job.get("knwlg_info_id"), job.get("term_vrf_seq"), vrf_data_reslt_json, None)
+    data = _build_callback_data(job.get("knwlg_info_id"), job.get("term_vrf_seq"), vrf_data_reslt_json, None)
     callback_result = await callback_service.send_callback_multipart(
-        settings.terms_verification_callback_url, fields, file_part
+        settings.terms_verification_callback_url, data, file_part
     )
     await terms_job_service.record_callback_result(job["id"], callback_result.success, callback_result.message)

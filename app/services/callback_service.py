@@ -81,17 +81,20 @@ async def send_callback(url: str, payload: dict) -> CallbackResult:
 
 
 async def send_callback_multipart(
-    url: str, fields: dict[str, str], file: tuple[str, bytes, str] | None = None
+    url: str, data: dict, file: tuple[str, bytes, str] | None = None
 ) -> CallbackResult:
     """콜백 URL로 multipart/form-data를 전송한다.
 
-    fields는 텍스트 파트로 그대로 실리고, file은 (filename, content, content_type) 튜플로
-    진짜 바이너리 파트가 된다. file이 없어도 항상 multipart로 나가도록 빈 파일 파트를
-    채운다 - httpx는 files가 비어있으면 application/x-www-form-urlencoded로 인코딩해버려서,
-    요청마다 Content-Type이 달라지는 걸 막으려면 file 파트 자체는 항상 있어야 한다.
+    최상단은 data와 file 두 파트뿐이다. data는 JSON 문자열로 직렬화되어 텍스트 파트로 실리고
+    (knwlgInfoId/termVrfSeq/vrfDataResltJson/errSbst는 모두 그 안에 중첩된다), file은
+    (filename, content, content_type) 튜플로 진짜 바이너리 파트가 된다. file이 없어도 항상
+    multipart로 나가도록 빈 파일 파트를 채운다 - httpx는 files가 비어있으면
+    application/x-www-form-urlencoded로 인코딩해버려서, 요청마다 Content-Type이 달라지는 걸
+    막으려면 file 파트 자체는 항상 있어야 한다.
     """
+    data_json = json.dumps(data, ensure_ascii=False)
     file_desc = f"{file[0]} ({len(file[1])} bytes, {file[2]})" if file else "(없음)"
-    logger.info("콜백 전송(multipart): url=%s fields=%s file=%s", url, fields, file_desc)
+    logger.info("콜백 전송(multipart): url=%s data=%s file=%s", url, data_json, file_desc)
 
     files = {"file": file or ("", b"", "application/octet-stream")}
-    return await _post_with_retry(url, data=fields, files=files)
+    return await _post_with_retry(url, data={"data": data_json}, files=files)
