@@ -61,7 +61,9 @@ async def get_verification_status(rqtKey: str) -> ApiResponse[dict]:
 
     if job["status"] == "completed":
         content = await file_storage_service.download_file(job["result_file_path"])
-        return ApiResponse[dict](statusCode=200, statusMsg="OK", result=json.loads(content))
+        stored = json.loads(content)
+        summary = terms_verification_service.build_stored_summary(job, stored)
+        return ApiResponse[dict](statusCode=200, statusMsg="OK", result=summary)
 
     return ApiResponse[dict](
         statusCode=200,

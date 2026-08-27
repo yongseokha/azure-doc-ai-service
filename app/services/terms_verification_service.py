@@ -324,10 +324,12 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
 
 
-async def resend_stored_result(job: dict) -> None:
-    """재검증 없이, 이미 완료된 job의 저장된 결과(및 리포트)를 그대로 다시 콜백으로 전송한다."""
-    content = await file_storage_service.download_file(job["result_file_path"])
-    stored = json.loads(content.decode("utf-8"))
+def build_stored_summary(job: dict, stored: dict) -> dict:
+    """저장된 result.json(stored)과 job 메타데이터로 검증 일시/통계가 포함된 요약을 만든다.
+
+    콜백 재전송(resend_stored_result)과 GET 상태조회가 이 함수를 공유해서, 완료된 job을
+    어느 경로로 조회하든 같은 verifiedAt/통계/overallResult를 보게 한다.
+    """
     result = TermsVerificationResult.model_validate(stored)
 
     completed_at = job.get("completed_at")
@@ -339,20 +341,26 @@ async def resend_stored_result(job: dict) -> None:
         verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     overview_stats = report_service.compute_overview_stats(result)
 
+    return {
+        "verifiedAt": verified_at,
+        **overview_stats,
+        "data": stored["data"],
+    }
+
+
+async def resend_stored_result(job: dict) -> None:
+    """재검증 없이, 이미 완료된 job의 저장된 결과(및 리포트)를 그대로 다시 콜백으로 전송한다."""
+    content = await file_storage_service.download_file(job["result_file_path"])
+    stored = json.loads(content.decode("utf-8"))
+    summary = build_stored_summary(job, stored)
+
     file_b64 = None
     report_path = job.get("report_file_path")
     if report_path:
         report_bytes = await file_storage_service.download_file(report_path)
         file_b64 = base64.b64encode(report_bytes).decode("ascii")
 
-    vrf_data_reslt_json = json.dumps(
-        {
-            "verifiedAt": verified_at,
-            **overview_stats,
-            "data": stored["data"],
-        },
-        ensure_ascii=False,
-    )
+    vrf_data_reslt_json = json.dumps(summary, ensure_ascii=False)
     body = _build_callback_body(
         job.get("knwlg_info_id"),
         job.get("term_vrf_seq"),
