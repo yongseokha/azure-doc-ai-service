@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
@@ -50,6 +51,8 @@ async def _post_with_retry(url: str, **kwargs) -> CallbackResult:
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS[attempt])
             continue
 
+        logger.info("콜백 응답: url=%s status=%s body=%s", url, response.status_code, response.text)
+
         try:
             body = response.json()
         except ValueError:
@@ -69,6 +72,11 @@ async def _post_with_retry(url: str, **kwargs) -> CallbackResult:
 
 async def send_callback(url: str, payload: dict) -> CallbackResult:
     """콜백 URL로 JSON 바디를 전송한다."""
+    logger.info(
+        "콜백 전송(JSON): url=%s payload=%s",
+        url,
+        json.dumps(payload, ensure_ascii=False, default=str),
+    )
     return await _post_with_retry(url, json=payload)
 
 
@@ -82,5 +90,8 @@ async def send_callback_multipart(
     채운다 - httpx는 files가 비어있으면 application/x-www-form-urlencoded로 인코딩해버려서,
     요청마다 Content-Type이 달라지는 걸 막으려면 file 파트 자체는 항상 있어야 한다.
     """
+    file_desc = f"{file[0]} ({len(file[1])} bytes, {file[2]})" if file else "(없음)"
+    logger.info("콜백 전송(multipart): url=%s fields=%s file=%s", url, fields, file_desc)
+
     files = {"file": file or ("", b"", "application/octet-stream")}
     return await _post_with_retry(url, data=fields, files=files)
