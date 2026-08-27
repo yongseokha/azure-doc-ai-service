@@ -30,8 +30,8 @@ async def close() -> None:
     get_client.cache_clear()
 
 
-async def send_callback(url: str, payload: dict) -> CallbackResult:
-    """콜백 URL로 결과를 전송한다.
+async def _post_with_retry(url: str, **kwargs) -> CallbackResult:
+    """콜백 URL로 POST하고 응답을 해석한다.
 
     응답 본문은 {"result": 0/1, "message": ..., "data": ...} 형태이며, result=0이 진짜 성공이다.
     - HTTP 레벨 에러(타임아웃/5xx 등)만 backoff와 함께 재시도한다.
@@ -42,7 +42,7 @@ async def send_callback(url: str, payload: dict) -> CallbackResult:
 
     for attempt in range(MAX_ATTEMPTS):
         try:
-            response = await client.post(url, json=payload)
+            response = await client.post(url, **kwargs)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.warning("콜백 호출 실패 (%d/%d): url=%s error=%s", attempt + 1, MAX_ATTEMPTS, url, exc)
@@ -65,3 +65,22 @@ async def send_callback(url: str, payload: dict) -> CallbackResult:
 
     logger.error("콜백 최종 실패: url=%s", url)
     return CallbackResult(success=False, message=None)
+
+
+async def send_callback(url: str, payload: dict) -> CallbackResult:
+    """콜백 URL로 JSON 바디를 전송한다."""
+    return await _post_with_retry(url, json=payload)
+
+
+async def send_callback_multipart(
+    url: str, fields: dict[str, str], file: tuple[str, bytes, str] | None = None
+) -> CallbackResult:
+    """콜백 URL로 multipart/form-data를 전송한다.
+
+    fields는 텍스트 파트로 그대로 실리고, file은 (filename, content, content_type) 튜플로
+    진짜 바이너리 파트가 된다. file이 없어도 항상 multipart로 나가도록 빈 파일 파트를
+    채운다 - httpx는 files가 비어있으면 application/x-www-form-urlencoded로 인코딩해버려서,
+    요청마다 Content-Type이 달라지는 걸 막으려면 file 파트 자체는 항상 있어야 한다.
+    """
+    files = {"file": file or ("", b"", "application/octet-stream")}
+    return await _post_with_retry(url, data=fields, files=files)

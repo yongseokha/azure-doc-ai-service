@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import json
 import textwrap
 from datetime import datetime
@@ -259,21 +258,23 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
     return names_result, _aggregate_usage(list(metrics) + split_metrics)
 
 
-def _build_callback_body(
-    knwlg_info_id: int,
-    term_vrf_seq: int,
+REPORT_FILENAME = "report.xlsx"
+REPORT_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _build_callback_fields(
+    knwlg_info_id: int | None,
+    term_vrf_seq: int | None,
     vrf_data_reslt_json: str | None,
     err_sbst: str | None,
-    file_b64: str | None = None,
-) -> dict:
+) -> dict[str, str]:
+    """multipart/form-data로 나갈 텍스트 파트 4개. 항상 이 4개 키가 다 존재하고,
+    값이 없으면 빈 문자열로 채운다 (multipart엔 JSON null 개념이 없음)."""
     return {
-        "data": {
-            "knwlgInfoId": knwlg_info_id,
-            "termVrfSeq": term_vrf_seq,
-            "vrfDataResltJson": vrf_data_reslt_json,
-            "errSbst": err_sbst,
-        },
-        "file": file_b64,
+        "knwlgInfoId": str(knwlg_info_id) if knwlg_info_id is not None else "",
+        "termVrfSeq": str(term_vrf_seq) if term_vrf_seq is not None else "",
+        "vrfDataResltJson": vrf_data_reslt_json or "",
+        "errSbst": err_sbst or "",
     }
 
 
@@ -283,10 +284,12 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
             names_result, usage = await _verify_all(request)
     except Exception as exc:
         await terms_job_service.mark_failed(request.rqtKey, str(exc))
-        body = _build_callback_body(
+        fields = _build_callback_fields(
             request.knwlgInfoId, request.termVrfSeq, None, f"약관 검증 처리 중 오류가 발생했습니다: {exc}"
         )
-        callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
+        callback_result = await callback_service.send_callback_multipart(
+            settings.terms_verification_callback_url, fields
+        )
         await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
         return
 
@@ -305,7 +308,7 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     await file_storage_service.upload_file(
         report_path,
         report_bytes,
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_type=REPORT_CONTENT_TYPE,
     )
 
     await terms_job_service.mark_completed(request.rqtKey, result_path, report_path, usage)
@@ -318,9 +321,11 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         },
         ensure_ascii=False,
     )
-    file_b64 = base64.b64encode(report_bytes).decode("ascii")
-    body = _build_callback_body(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None, file_b64)
-    callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
+    fields = _build_callback_fields(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None)
+    file_part = (REPORT_FILENAME, report_bytes, REPORT_CONTENT_TYPE)
+    callback_result = await callback_service.send_callback_multipart(
+        settings.terms_verification_callback_url, fields, file_part
+    )
     await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
 
 
@@ -354,19 +359,15 @@ async def resend_stored_result(job: dict) -> None:
     stored = json.loads(content.decode("utf-8"))
     summary = build_stored_summary(job, stored)
 
-    file_b64 = None
+    file_part = None
     report_path = job.get("report_file_path")
     if report_path:
         report_bytes = await file_storage_service.download_file(report_path)
-        file_b64 = base64.b64encode(report_bytes).decode("ascii")
+        file_part = (REPORT_FILENAME, report_bytes, REPORT_CONTENT_TYPE)
 
     vrf_data_reslt_json = json.dumps(summary, ensure_ascii=False)
-    body = _build_callback_body(
-        job.get("knwlg_info_id"),
-        job.get("term_vrf_seq"),
-        vrf_data_reslt_json,
-        None,
-        file_b64,
+    fields = _build_callback_fields(job.get("knwlg_info_id"), job.get("term_vrf_seq"), vrf_data_reslt_json, None)
+    callback_result = await callback_service.send_callback_multipart(
+        settings.terms_verification_callback_url, fields, file_part
     )
-    callback_result = await callback_service.send_callback(settings.terms_verification_callback_url, body)
     await terms_job_service.record_callback_result(job["id"], callback_result.success, callback_result.message)
