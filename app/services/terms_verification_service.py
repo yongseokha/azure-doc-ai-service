@@ -41,7 +41,7 @@ SYSTEM_PROMPT = textwrap.dedent("""\
        - 현재 값이 없으면, 상품명+항목명을 기준으로 약관에서 값을 찾아 채우세요.
        - 약관에 이 항목에 대한 내용 자체가 없으면 null로 하세요.
     2. evidence: 위에서 판단한 llmValue의 근거가 되는 문장을 약관 원문에서 생략·의역 없이 그대로 인용하세요. 근거가 되는 문장이 여러 곳에 있으면, llmValue를 가장 직접적으로 뒷받침하는 문장 하나만 인용하세요. llmValue가 null이면 evidence도 null로 하세요.
-    3. page: evidence가 위치한 페이지 번호를 원문의 <!-- PageNumber="N" --> 마커를 참고해 기입하세요. evidence가 null이거나 페이지를 특정할 수 없으면 null로 하세요.
+    3. page: evidence가 위치한 페이지 번호를 원문의 <!-- PageNumber="N" --> 마커로 판단하세요. 이 마커는 각 페이지 본문의 앞이 아니라 뒤(하단, PageFooter 바로 다음)에 붙어 있으므로, evidence와 그 뒤에 처음 나오는 <!-- PageBreak --> 사이에 있는 PageNumber 마커의 값을 사용하세요 (evidence보다 앞에 나온 마커는 이전 페이지의 것이니 사용하지 마세요). 그 사이에 PageNumber 마커가 없으면 - 예를 들어 PageBreak가 먼저 나오는 경우 - 다음 페이지의 PageNumber를 가져다 쓰지 말고 null로 하세요. evidence가 null이면 page도 null로 하세요.
     4. article: evidence가 위치한 약관 조항 번호(예: "제3조", "제3조 2항")가 원문에 표기되어 있으면 기입하세요. evidence가 null이거나 조항을 특정할 수 없으면 null로 하세요.
     5. reason: 현재 값과 llmValue가 다른 경우 그 차이를 설명하세요. 현재 값과 llmValue가 완전히 같으면 null로 하세요.
        - 차이가 있다면 그 차이가 다음 중 무엇인지 구분해서 명시하세요: ① 현재 값에 llmValue와 다른(틀린) 내용이 있는 경우 → 어떤 부분이 근거상 확인되지 않는/틀린 내용인지 명시하세요. ② llmValue에 있는 내용이 현재 값에서 빠진(누락된) 경우 → 어떤 내용이 빠졌는지 명시하세요. 두 가지가 함께 있다면 둘 다 명시하세요. '누락되었습니다' 같은 표현은 실제로 빠진 내용에 대해서만 쓰고, 현재 값 자체가 틀린 경우에는 '틀린 내용입니다/근거에서 확인되지 않습니다' 등으로 명확히 구분해서 표현하세요.
@@ -59,7 +59,7 @@ ITEM_VERIFICATION_SCHEMA = {
             "evidence": {"type": ["string", "null"]},
             "page": {
                 "type": ["integer", "null"],
-                "description": "evidence가 위치한 페이지 번호 (원문의 PageNumber 마커 기준)",
+                "description": "evidence가 위치한 페이지 번호. evidence와 그 뒤 첫 PageBreak 사이에 있는 PageNumber 마커 값 (마커는 각 페이지 본문 하단에 위치). 그 사이에 없으면 null",
             },
             "article": {
                 "type": ["string", "null"],
