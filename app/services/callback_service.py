@@ -42,8 +42,10 @@ async def _post_with_retry(url: str, **kwargs) -> CallbackResult:
     client = get_client()
 
     for attempt in range(MAX_ATTEMPTS):
+        request = client.build_request("POST", url, **kwargs)
+        logger.info("콜백 요청 헤더: url=%s content-type=%s", url, request.headers.get("content-type"))
         try:
-            response = await client.post(url, **kwargs)
+            response = await client.send(request)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.warning("콜백 호출 실패 (%d/%d): url=%s error=%s", attempt + 1, MAX_ATTEMPTS, url, exc)
