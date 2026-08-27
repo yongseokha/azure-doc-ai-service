@@ -87,10 +87,13 @@ async def send_callback_multipart(
 ) -> CallbackResult:
     """콜백 URL로 multipart/form-data를 전송한다.
 
-    최상단은 data와 file 두 파트뿐이다. data는 JSON 문자열로 직렬화되어 텍스트 파트로 실리고
-    (knwlgInfoId/termVrfSeq/vrfDataResltJson/errSbst는 모두 그 안에 중첩된다), file은
-    (filename, content, content_type) 튜플로 진짜 바이너리 파트가 된다. file이 없어도 항상
-    multipart로 나가도록 빈 파일 파트를 채운다 - httpx는 files가 비어있으면
+    최상단은 data와 file 두 파트뿐이다. data는 JSON 문자열로 직렬화되어 Content-Type이
+    application/json인 파트로 실리고(knwlgInfoId/termVrfSeq/vrfDataResltJson/errSbst는
+    모두 그 안에 중첩된다), file은 (filename, content, content_type) 튜플로 진짜 바이너리
+    파트가 된다. data 파트는 filename 없이 (None, ...) 형태로 넘겨야 받는 쪽(예: Spring의
+    @RequestPart로 객체 역직렬화)이 이 파트를 JSON으로 인식한다 - 일반 폼 필드로 보내면
+    Content-Type이 안 붙어서 역직렬화가 안 될 수 있다. file이 없어도 항상 multipart로
+    나가도록 빈 파일 파트를 채운다 - httpx는 files가 비어있으면
     application/x-www-form-urlencoded로 인코딩해버려서, 요청마다 Content-Type이 달라지는 걸
     막으려면 file 파트 자체는 항상 있어야 한다.
     """
@@ -98,5 +101,8 @@ async def send_callback_multipart(
     file_desc = f"{file[0]} ({len(file[1])} bytes, {file[2]})" if file else "(없음)"
     logger.info("콜백 전송(multipart): url=%s data=%s file=%s", url, data_json, file_desc)
 
-    files = {"file": file or ("", b"", "application/octet-stream")}
-    return await _post_with_retry(url, data={"data": data_json}, files=files)
+    files = {
+        "data": (None, data_json, "application/json"),
+        "file": file or ("", b"", "application/octet-stream"),
+    }
+    return await _post_with_retry(url, files=files)
