@@ -186,7 +186,12 @@ def _assemble(
         TermsNameResult(
             name=name,
             documents=[
-                TermsDocumentItemsResult(ocrResltKey=hash_key, termNm=ref_by_hash[hash_key].termNm, items=items)
+                TermsDocumentItemsResult(
+                    ocrResltKey=hash_key,
+                    termNm=ref_by_hash[hash_key].termNm,
+                    termEnfcDt=ref_by_hash[hash_key].termEnfcDt,
+                    items=items,
+                )
                 for hash_key, items in docs.items()
             ],
         )
@@ -292,7 +297,7 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         await terms_job_service.record_callback_result(request.rqtKey, callback_result.success, callback_result.message)
         return
 
-    result = TermsVerificationResult(data=names_result)
+    result = TermsVerificationResult(knwlgNm=request.knwlgNm, data=names_result)
     result_path = f"{RESULT_ROOT}/{request.rqtKey}/result.json"
     await file_storage_service.upload_file(
         result_path, result.model_dump_json().encode("utf-8"), content_type="application/json"
@@ -300,7 +305,6 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
 
     # 리포트(엑셀)와 콜백 JSON이 같은 검증 일시/통계를 쓰도록 여기서 한 번만 계산해서 넘긴다.
     verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    overview_stats = report_service.compute_overview_stats(result)
 
     report_bytes = await asyncio.to_thread(report_service.build_report_xlsx, result, verified_at)
     report_path = f"{RESULT_ROOT}/{request.rqtKey}/report.xlsx"
@@ -312,14 +316,7 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
 
     await terms_job_service.mark_completed(request.rqtKey, result_path, report_path, usage)
 
-    vrf_data_reslt_json = json.dumps(
-        {
-            "verifiedAt": verified_at,
-            **overview_stats,
-            "data": [n.model_dump() for n in result.data],
-        },
-        ensure_ascii=False,
-    )
+    vrf_data_reslt_json = json.dumps(report_service.build_result_payload(result, verified_at), ensure_ascii=False)
     data = _build_callback_data(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None)
     file_part = (REPORT_FILENAME, report_bytes, REPORT_CONTENT_TYPE)
     callback_result = await callback_service.send_callback_multipart(
@@ -343,13 +340,8 @@ def build_stored_summary(job: dict, stored: dict) -> dict:
         verified_at = completed_at
     else:
         verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    overview_stats = report_service.compute_overview_stats(result)
 
-    return {
-        "verifiedAt": verified_at,
-        **overview_stats,
-        "data": stored["data"],
-    }
+    return report_service.build_result_payload(result, verified_at)
 
 
 async def resend_stored_result(job: dict) -> None:

@@ -17,6 +17,8 @@ STATUS_STYLE = {
     "일치": {"fill": "C6EFCE", "font": "006100"},
     "부분 일치": {"fill": "FFEB9C", "font": "9C6500"},
     "불일치": {"fill": "FFC7CE", "font": "9C0006"},
+    "약관 검증 필요": {"fill": "FFF9C4", "font": "CC0000"},
+    "약관 검증 패스": {"fill": "FFF9C4", "font": "1B7A1B"},
 }
 COLUMN_LABELS = {
     "name": "대상명",
@@ -29,10 +31,27 @@ COLUMN_LABELS = {
     "article": "조항",
     "reason": "차이 설명",
     "status": "검토 결과",
+    "totalCnt": "총 검증 항목",
+    "matchedCnt": "일치",
+    "partialMatchCnt": "부분 일치",
+    "mismatchCnt": "불일치",
+    "overallResult": "종합 판정",
 }
-WRAP_COLUMNS = {"evidence", "reason"}
-COLUMN_WIDTHS = [22, 22, 22, 50, 8, 16, 40, 14]
+# 왼쪽+위 정렬(줄바꿈): 문장 길이가 제각각이라 여러 줄로 넘어갈 수 있는 컬럼들
+TOP_LEFT_COLUMNS = {"itemNm", "value", "subClaim", "evidence", "reason"}
+# 중앙+수직중앙 정렬: 짧은 값(숫자/코드성 텍스트) 컬럼들
+CENTER_COLUMNS = {
+    "page", "article",
+    "totalCnt", "matchedCnt", "partialMatchCnt", "mismatchCnt",
+    "일치", "부분 일치", "불일치", "합계",
+}
+# 왼쪽+수직중앙 정렬: 짧은 식별용 텍스트(상품명/문서명) 컬럼들
+LEFT_CENTER_COLUMNS = {"name", "termNm"}
+
+COLUMN_WIDTHS = [22, 18, 18, 38, 12, 16, 32, 14]  # itemNm,value,subClaim,evidence,page,article,reason,status
+SUMMARY_COLUMN_WIDTHS = [22, 16, 16, 16, 16, 24]  # name,totalCnt,matchedCnt,partialMatchCnt,mismatchCnt,overallResult
 MAX_COL = len(COLUMN_WIDTHS)
+SUMMARY_MAX_COL = len(SUMMARY_COLUMN_WIDTHS)
 
 _THIN_SIDE = Side(style="thin", color="B7B7B7")
 BOX_BORDER = Border(left=_THIN_SIDE, right=_THIN_SIDE, top=_THIN_SIDE, bottom=_THIN_SIDE)
@@ -43,11 +62,6 @@ BANNER_FILL = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="s
 BANNER_FONT = Font(bold=True, size=13, color="375623")
 STATS_HEADER_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 ZEBRA_FILL = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
-CARD_STYLES = {
-    "total": {"fill": "EDEDED", "font": "404040"},
-    "matched": {"fill": "E2EFDA", "font": "375623"},
-    "mismatch": {"fill": "FCE4EC", "font": "9C0006"},
-}
 
 
 def _flatten(result: TermsVerificationResult) -> pd.DataFrame:
@@ -84,19 +98,12 @@ def _build_item_row(item) -> dict:
     return row
 
 
-def compute_overview_stats(result: TermsVerificationResult) -> dict:
-    """전체 항목 수, status별 건수, 종합 판정을 계산한다.
-
-    엑셀 리포트의 검증 요약 대시보드와 콜백의 vrfDataResltJson이 같은 숫자를 쓰도록
-    양쪽에서 공유하는 함수다.
-    """
+def _stats_from_items(items) -> dict:
     counts = dict.fromkeys(STATUS_ORDER, 0)
-    for name_result in result.data:
-        for doc_result in name_result.documents:
-            for item in doc_result.items:
-                counts[item.status] = counts.get(item.status, 0) + 1
+    for item in items:
+        counts[item.status] = counts.get(item.status, 0) + 1
     total = sum(counts.values())
-    overall_result = "약관 개정 필요" if counts["MISMATCH"] > 0 else "약관 개정 불필요"
+    overall_result = "약관 검증 필요" if counts["MISMATCH"] > 0 else "약관 검증 패스"
     return {
         "totalCnt": total,
         "matchedCnt": counts["MATCHED"],
@@ -106,28 +113,68 @@ def compute_overview_stats(result: TermsVerificationResult) -> dict:
     }
 
 
-def _write_title(ws, row: int) -> int:
+def compute_overview_stats(result: TermsVerificationResult) -> dict:
+    """전체 항목 수, status별 건수, 종합 판정을 계산한다.
+
+    엑셀 리포트와 콜백의 vrfDataResltJson이 같은 숫자를 쓰도록 양쪽에서 공유하는 함수다.
+    """
+    all_items = [item for name_result in result.data for doc_result in name_result.documents for item in doc_result.items]
+    return _stats_from_items(all_items)
+
+
+def build_result_payload(result: TermsVerificationResult, verified_at: str) -> dict:
+    """콜백의 vrfDataResltJson과 GET 상태조회가 공유하는 전체 결과 payload를 만든다.
+
+    통계(totalCnt/matchedCnt/partialMatchCnt/mismatchCnt/overallResult)를 전체/name별/
+    문서별 세 계층에 각각 인라인으로 넣는다 - 세 계층 다 같은 필드명을 쓰므로 파싱 로직을
+    재사용할 수 있다.
+    """
+    data = []
+    for name_result in result.data:
+        name_items = [item for doc_result in name_result.documents for item in doc_result.items]
+        documents = []
+        for doc_result in name_result.documents:
+            documents.append(
+                {
+                    "ocrResltKey": doc_result.ocrResltKey,
+                    "termNm": doc_result.termNm,
+                    "termEnfcDt": doc_result.termEnfcDt,
+                    **_stats_from_items(doc_result.items),
+                    "items": [item.model_dump() for item in doc_result.items],
+                }
+            )
+        data.append({"name": name_result.name, **_stats_from_items(name_items), "documents": documents})
+
+    return {
+        "knwlgNm": result.knwlgNm,
+        "verifiedAt": verified_at,
+        **compute_overview_stats(result),
+        "data": data,
+    }
+
+
+def _write_title(ws, row: int, max_col: int) -> int:
     ws.cell(row=row, column=1, value="상품지식-약관 검증 AI 결과 보고서")
-    for col_idx in range(1, MAX_COL + 1):
+    for col_idx in range(1, max_col + 1):
         cell = ws.cell(row=row, column=col_idx)
         cell.fill = TITLE_FILL
         cell.border = BOX_BORDER
     title_cell = ws.cell(row=row, column=1)
     title_cell.font = TITLE_FONT
     title_cell.alignment = Alignment(horizontal="left", vertical="center")
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=MAX_COL)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=max_col)
     ws.row_dimensions[row].height = 28
     return row + 2
 
 
-def _write_section_title(ws, row: int, title: str) -> int:
+def _write_section_title(ws, row: int, title: str, max_col: int) -> int:
     ws.cell(row=row, column=1, value=title)
-    for col_idx in range(1, MAX_COL + 1):
+    for col_idx in range(1, max_col + 1):
         cell = ws.cell(row=row, column=col_idx)
         cell.fill = BANNER_FILL
         cell.border = BOX_BORDER
     ws.cell(row=row, column=1).font = BANNER_FONT
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=MAX_COL)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=max_col)
     return row + 1
 
 
@@ -162,18 +209,21 @@ def _write_table(
     ws,
     df: pd.DataFrame,
     start_row: int,
+    max_col: int,
     title: str | None = None,
     merge_columns: frozenset = frozenset(),
     highlight_header: bool = False,
     status_column: str | None = None,
     bold_columns: frozenset = frozenset(),
+    row_height: int | None = None,
 ) -> int:
     row = start_row
     if title:
         title_cell = ws.cell(row=row, column=1, value=title)
         title_cell.font = Font(bold=True, size=12)
-        for col_idx in range(1, MAX_COL + 1):
+        for col_idx in range(1, max_col + 1):
             ws.cell(row=row, column=col_idx).border = BOX_BORDER
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=max_col)
         row += 1
 
     if df.empty:
@@ -187,24 +237,32 @@ def _write_table(
         cell = ws.cell(row=row, column=col_idx, value=header)
         cell.font = header_font
         cell.border = BOX_BORDER
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.fill = header_fill if highlight_header else STATS_HEADER_FILL
     row += 1
     data_start_row = row
 
     for row_idx, (_, record) in enumerate(df.iterrows()):
         zebra = row_idx % 2 == 1
+        if row_height:
+            ws.row_dimensions[row].height = row_height
         for col_idx, col_name in enumerate(df.columns, start=1):
             value = record[col_name]
             cell = ws.cell(row=row, column=col_idx, value=None if pd.isna(value) else value)
             cell.border = BOX_BORDER
-            if col_name in WRAP_COLUMNS:
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+            if col_name in TOP_LEFT_COLUMNS:
+                cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+            elif col_name in CENTER_COLUMNS:
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_name in LEFT_CENTER_COLUMNS:
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+
             if col_name == status_column and value in STATUS_STYLE:
                 style = STATUS_STYLE[value]
                 cell.fill = PatternFill(start_color=style["fill"], end_color=style["fill"], fill_type="solid")
                 cell.font = Font(bold=True, color=style["font"])
-                cell.alignment = Alignment(horizontal="center")
+                cell.alignment = Alignment(horizontal="center", vertical="center")
             elif col_name in bold_columns:
                 cell.font = Font(bold=True)
             elif zebra:
@@ -222,79 +280,69 @@ def _write_table(
     return row + 1
 
 
-def _write_overview(ws, result: TermsVerificationResult, start_row: int, verified_at: str) -> int:
-    row = _write_section_title(ws, start_row, "1. 개요")
+def _write_verification_info(ws, row: int, max_col: int, verified_at: str, result: TermsVerificationResult) -> int:
+    row = _write_section_title(ws, row, "검증 정보", max_col)
 
-    names = list(dict.fromkeys(name_result.name for name_result in result.data))
-    docs = list(
-        dict.fromkeys(
-            doc_result.termNm for name_result in result.data for doc_result in name_result.documents
-        )
-    )
+    all_items = [item for name_result in result.data for doc_result in name_result.documents for item in doc_result.items]
+    keywords = list(dict.fromkeys(item.itemNm for item in all_items))
+
+    unique_docs = list({doc_result.ocrResltKey: doc_result for name_result in result.data for doc_result in name_result.documents}.values())
+    term_list = [
+        f"{doc_result.termNm}({doc_result.termEnfcDt})" if doc_result.termEnfcDt else doc_result.termNm
+        for doc_result in unique_docs
+    ]
 
     label_fill = PatternFill(start_color="F7F7F7", end_color="F7F7F7", fill_type="solid")
     for label, value in [
+        ("지식명", result.knwlgNm or ""),
         ("검증 일시", verified_at),
-        ("대상 상품지식", ", ".join(names)),
-        ("매핑약관", ", ".join(docs)),
+        ("검색 키워드", ", ".join(keywords)),
+        ("약관 시행일", ", ".join(term_list)),
     ]:
         label_cell = ws.cell(row=row, column=1, value=label)
         label_cell.font = Font(bold=True)
         label_cell.fill = label_fill
         label_cell.border = BOX_BORDER
-        ws.cell(row=row, column=2, value=value).border = BOX_BORDER
-        for col_idx in range(3, MAX_COL + 1):
+        label_cell.alignment = Alignment(horizontal="left", vertical="center")
+        value_cell = ws.cell(row=row, column=2, value=value)
+        value_cell.border = BOX_BORDER
+        value_cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=max_col)
+        for col_idx in range(3, max_col + 1):
             ws.cell(row=row, column=col_idx).border = BOX_BORDER
         row += 1
-
     return row + 1
 
 
-def _write_summary_dashboard(ws, stats: dict, start_row: int) -> int:
-    row = _write_section_title(ws, start_row, "2. 검증 요약 대시보드")
+def _write_result_summary(ws, row: int, max_col: int, result: TermsVerificationResult) -> int:
+    row = _write_section_title(ws, row, "검증 결과 요약", max_col)
 
-    cards = [
-        ("총 검증 항목", f"{stats['totalCnt']} 건", "total"),
-        ("일치 / 부분일치", f"{stats['matchedCnt']} / {stats['partialMatchCnt']}", "matched"),
-        ("불일치", f"{stats['mismatchCnt']} 건", "mismatch"),
-    ]
+    records = []
+    for name_result in result.data:
+        items = [item for doc_result in name_result.documents for item in doc_result.items]
+        records.append({"name": name_result.name, **_stats_from_items(items)})
+    df = pd.DataFrame(
+        records, columns=["name", "totalCnt", "matchedCnt", "partialMatchCnt", "mismatchCnt", "overallResult"]
+    )
 
-    label_row, value_row = row, row + 1
-    for col_idx, (label, value, style_key) in enumerate(cards, start=1):
-        style = CARD_STYLES[style_key]
-        fill = PatternFill(start_color=style["fill"], end_color=style["fill"], fill_type="solid")
-
-        label_cell = ws.cell(row=label_row, column=col_idx, value=label)
-        label_cell.font = Font(bold=True, size=11, color=style["font"])
-        label_cell.fill = fill
-        label_cell.border = BOX_BORDER
-        label_cell.alignment = Alignment(horizontal="center")
-
-        value_cell = ws.cell(row=value_row, column=col_idx, value=value)
-        value_cell.font = Font(bold=True, size=20, color=style["font"])
-        value_cell.fill = fill
-        value_cell.border = BOX_BORDER
-        value_cell.alignment = Alignment(horizontal="center")
-
-    ws.row_dimensions[value_row].height = 32
-    for col_idx in range(len(cards) + 1, MAX_COL + 1):
-        ws.cell(row=label_row, column=col_idx).border = BOX_BORDER
-        ws.cell(row=value_row, column=col_idx).border = BOX_BORDER
-
-    return value_row + 2
+    return _write_table(
+        ws, df, row, max_col, None,
+        highlight_header=True, status_column="overallResult", bold_columns=frozenset({"name"}),
+        row_height=22,
+    )
 
 
-def _write_detailed_stats(ws, df: pd.DataFrame, start_row: int) -> int:
-    row = _write_section_title(ws, start_row, "3. 상세 통계")
-    row = _write_table(ws, _grouped_stats(df, ["name"]), row, "상품명별 통계", bold_columns=frozenset({"name"}))
+def _write_detailed_stats(ws, df: pd.DataFrame, start_row: int, max_col: int) -> int:
+    row = _write_section_title(ws, start_row, "상세 통계", max_col)
+    row = _write_table(ws, _grouped_stats(df, ["name"]), row, max_col, "상품명별 통계", bold_columns=frozenset({"name"}))
     row = _write_table(
-        ws, _grouped_stats(df, ["name", "termNm"]), row, "문서별 통계", bold_columns=frozenset({"name"})
+        ws, _grouped_stats(df, ["name", "termNm"]), row, max_col, "문서별 통계", bold_columns=frozenset({"name"})
     )
     return row
 
 
-def _write_item_detail(ws, result: TermsVerificationResult, start_row: int) -> int:
-    row = _write_section_title(ws, start_row, "4. 항목별 상세 비교 결과")
+def _write_item_detail(ws, result: TermsVerificationResult, start_row: int, max_col: int) -> int:
+    row = _write_section_title(ws, start_row, "항목별 상세 비교 결과", max_col)
     for name_result in result.data:
         for doc_result in name_result.documents:
             item_df = pd.DataFrame(
@@ -305,6 +353,7 @@ def _write_item_detail(ws, result: TermsVerificationResult, start_row: int) -> i
                 ws,
                 item_df,
                 row,
+                max_col,
                 f"{name_result.name} - {doc_result.termNm}",
                 merge_columns=frozenset({"itemNm", "value"}),
                 highlight_header=True,
@@ -315,30 +364,34 @@ def _write_item_detail(ws, result: TermsVerificationResult, start_row: int) -> i
 
 
 def build_report_xlsx(result: TermsVerificationResult, verified_at: str | None = None) -> bytes:
-    """검증 결과를 하나의 시트에 제목 -> 1.개요 -> 2.검증 요약 대시보드 -> 3.상세 통계 ->
-    4.항목별 상세 비교 결과 순서로 담은 xlsx를 만든다. 4번은 (name, 문서) 조합별 표를
-    상품명 -> 문서 순서로 수직 나열한다.
+    """검증 결과를 2개 시트로 담은 xlsx를 만든다.
+
+    - 시트1 "검증 요약": 검증 정보(지식명/검증 일시/검색 키워드/약관 시행일) + 검증 결과 요약(name별 통계)
+    - 시트2 "상세 결과": 상세 통계(상품명별/문서별) + 항목별 상세 비교 결과
 
     verified_at을 안 넘기면 호출 시점 시각을 쓴다 - 콜백 JSON(vrfDataResltJson)의
     verifiedAt과 같은 값을 쓰고 싶으면 호출하는 쪽에서 계산해서 넘겨야 한다.
     """
     verified_at = verified_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    df = _flatten(result)
-    stats = compute_overview_stats(result)
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "약관비교 결과"
 
+    ws1 = wb.active
+    ws1.title = "검증 요약"
     row = 1
-    row = _write_title(ws, row)
-    row = _write_overview(ws, result, row, verified_at)
-    row = _write_summary_dashboard(ws, stats, row)
-    row = _write_detailed_stats(ws, df, row)
-    _write_item_detail(ws, result, row)
+    row = _write_title(ws1, row, SUMMARY_MAX_COL)
+    row = _write_verification_info(ws1, row, SUMMARY_MAX_COL, verified_at, result)
+    _write_result_summary(ws1, row, SUMMARY_MAX_COL, result)
+    for col_idx, width in enumerate(SUMMARY_COLUMN_WIDTHS, start=1):
+        ws1.column_dimensions[get_column_letter(col_idx)].width = width
 
+    ws2 = wb.create_sheet("상세 결과")
+    df = _flatten(result)
+    row = 1
+    row = _write_detailed_stats(ws2, df, row, MAX_COL)
+    _write_item_detail(ws2, result, row, MAX_COL)
     for col_idx, width in enumerate(COLUMN_WIDTHS, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
+        ws2.column_dimensions[get_column_letter(col_idx)].width = width
 
     buffer = io.BytesIO()
     wb.save(buffer)

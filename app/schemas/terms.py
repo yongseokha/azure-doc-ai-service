@@ -8,6 +8,7 @@ from app.schemas.base import ApiRequest
 class DocumentReference(BaseModel):
     ocrResltKey: str = Field(examples=["a3f5c9d8e1b2..."], description="OCR 캐시 조회 키 (문서 해시)")
     termNm: str = Field(examples=["KT 요고 시리즈 이용약관"], description="표시용 약관명 (처리 로직에는 사용되지 않음)")
+    termEnfcDt: str = Field(examples=["2026-01-01"], description="약관 시행일 (처리 로직에는 사용되지 않음, 보관/표시용)")
 
 
 class TermsItem(BaseModel):
@@ -36,6 +37,7 @@ class TermsVerificationRequest(ApiRequest):
     data: list[TermsNameGroup] = Field(min_length=1, description="각 name의 items는 termInfo의 모든 문서와 교차 비교됨")
     knwlgInfoId: int = Field(description="지식 정보 ID (콜백 본문에 받은 그대로 실려감)")
     termVrfSeq: int = Field(description="약관 버전 순번 (콜백 본문에 받은 그대로 실려감)")
+    knwlgNm: str = Field(examples=["KT 요고 시리즈"], description="지식명 (콜백/리포트에 그대로 표시됨)")
 
 
 class TermsItemResult(BaseModel):
@@ -57,6 +59,7 @@ class TermsItemResult(BaseModel):
 class TermsDocumentItemsResult(BaseModel):
     ocrResltKey: str
     termNm: str
+    termEnfcDt: str | None = Field(default=None, description="약관 시행일. 이 필드 추가 이전에 저장된 결과는 null")
     items: list[TermsItemResult]
 
 
@@ -76,4 +79,5 @@ class UsageSummary(BaseModel):
 
 
 class TermsVerificationResult(BaseModel):
+    knwlgNm: str | None = Field(default=None, description="지식명. 이 필드 추가 이전에 저장된 결과는 null")
     data: list[TermsNameResult]
