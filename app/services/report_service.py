@@ -138,7 +138,7 @@ def build_result_payload(result: TermsVerificationResult, verified_at: str) -> d
                 {
                     "ocrResltKey": doc_result.ocrResltKey,
                     "termNm": doc_result.termNm,
-                    "termEnfcDt": doc_result.termEnfcDt,
+                    "aplyDate": doc_result.aplyDate,
                     **_stats_from_items(doc_result.items),
                     "items": [item.model_dump() for item in doc_result.items],
                 }
@@ -288,7 +288,7 @@ def _write_verification_info(ws, row: int, max_col: int, verified_at: str, resul
 
     unique_docs = list({doc_result.ocrResltKey: doc_result for name_result in result.data for doc_result in name_result.documents}.values())
     term_list = [
-        f"{doc_result.termNm}({doc_result.termEnfcDt})" if doc_result.termEnfcDt else doc_result.termNm
+        f"{doc_result.termNm}({doc_result.aplyDate})" if doc_result.aplyDate else doc_result.termNm
         for doc_result in unique_docs
     ]
 

@@ -189,7 +189,7 @@ def _assemble(
                 TermsDocumentItemsResult(
                     ocrResltKey=hash_key,
                     termNm=ref_by_hash[hash_key].termNm,
-                    termEnfcDt=ref_by_hash[hash_key].termEnfcDt,
+                    aplyDate=ref_by_hash[hash_key].aplyDate,
                     items=items,
                 )
                 for hash_key, items in docs.items()
