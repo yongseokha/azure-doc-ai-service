@@ -263,8 +263,12 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
     return names_result, _aggregate_usage(list(metrics) + split_metrics)
 
 
-REPORT_FILENAME = "report.xlsx"
 REPORT_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _build_report_filename(created_date: str, knwlg_info_id: int | None, knwlg_nm: str | None) -> str:
+    """생성일(YYYYMMDD)_지식ID_지식명.xlsx 형식의 리포트 파일명을 만든다."""
+    return f"{created_date}_{knwlg_info_id if knwlg_info_id is not None else ''}_{knwlg_nm or ''}.xlsx"
 
 
 def _build_callback_data(
@@ -304,10 +308,12 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
     )
 
     # 리포트(엑셀)와 콜백 JSON이 같은 검증 일시/통계를 쓰도록 여기서 한 번만 계산해서 넘긴다.
-    verified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now()
+    verified_at = now.strftime("%Y-%m-%d %H:%M:%S")
 
     report_bytes = await asyncio.to_thread(report_service.build_report_xlsx, result, verified_at)
-    report_path = f"{RESULT_ROOT}/{request.rqtKey}/report.xlsx"
+    report_filename = _build_report_filename(now.strftime("%Y%m%d"), request.knwlgInfoId, request.knwlgNm)
+    report_path = f"{RESULT_ROOT}/{request.rqtKey}/{report_filename}"
     await file_storage_service.upload_file(
         report_path,
         report_bytes,
@@ -318,7 +324,7 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
 
     vrf_data_reslt_json = json.dumps(report_service.build_result_payload(result, verified_at), ensure_ascii=False)
     data = _build_callback_data(request.knwlgInfoId, request.termVrfSeq, vrf_data_reslt_json, None)
-    file_part = (REPORT_FILENAME, report_bytes, REPORT_CONTENT_TYPE)
+    file_part = (report_filename, report_bytes, REPORT_CONTENT_TYPE)
     callback_result = await callback_service.send_callback_multipart(
         settings.terms_verification_callback_url, data, file_part
     )
@@ -354,7 +360,9 @@ async def resend_stored_result(job: dict) -> None:
     report_path = job.get("report_file_path")
     if report_path:
         report_bytes = await file_storage_service.download_file(report_path)
-        file_part = (REPORT_FILENAME, report_bytes, REPORT_CONTENT_TYPE)
+        created_date = summary["verifiedAt"][:10].replace("-", "")
+        report_filename = _build_report_filename(created_date, job.get("knwlg_info_id"), summary.get("knwlgNm"))
+        file_part = (report_filename, report_bytes, REPORT_CONTENT_TYPE)
 
     vrf_data_reslt_json = json.dumps(summary, ensure_ascii=False)
     data = _build_callback_data(job.get("knwlg_info_id"), job.get("term_vrf_seq"), vrf_data_reslt_json, None)
