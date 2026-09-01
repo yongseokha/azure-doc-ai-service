@@ -5,7 +5,8 @@
   "termInfo": [
     {
       "ocrResltKey": "여기에 실제 parse-di로 처리 완료된 문서의 ocrResltKey(문서 해시)를 넣으세요",
-      "termNm": "KT 요고 시리즈 이용약관"
+      "termNm": "KT 요고 시리즈 이용약관",
+      "aplyDate": "2026-01-01"
     }
   ],
   "data": [
@@ -26,5 +27,6 @@
     }
   ],
   "knwlgInfoId": 123456789012,
-  "termVrfSeq": 1
+  "termVrfSeq": 1,
+  "knwlgNm": "KT 요고 시리즈"
 }
