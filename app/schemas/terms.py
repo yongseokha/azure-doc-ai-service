@@ -77,6 +77,7 @@ class UsageSummary(BaseModel):
     totalPromptTokens: int
     totalCompletionTokens: int
     totalCachedTokens: int
+    totalCacheWriteTokens: int
     totalElapsedSeconds: float
     avgElapsedSeconds: float
 

@@ -95,18 +95,28 @@ CLAIM_SPLIT_SCHEMA = {
 CLAIM_SPLIT_SYSTEM_PROMPT = "당신은 약관 조건 텍스트를 독립적으로 검증 가능한 단위로 분해하는 어시스턴트입니다."
 
 
-def _build_user_prompt(document_text: str, name: str, item: TermsItem, claim: str | None) -> str:
-    # 약관 원문을 항상 맨 앞에 고정 배치 - 같은 문서에 대한 반복 호출에서 Azure OpenAI의
-    # prompt caching(동일 prefix 재사용) 효과를 받기 위함.
+def _build_user_content(document_text: str, name: str, item: TermsItem, claim: str | None) -> list[dict]:
+    # 약관 원문을 항상 맨 앞 블록에 고정 배치하고 명시적 캐시 breakpoint를 걸어서, 같은
+    # 문서에 대한 반복 호출에서 Azure OpenAI의 prompt caching 효과를 안정적으로 받는다.
+    # 가변적인 [검증 대상] 부분은 별도 블록으로 분리해 캐시 경계 뒤에 둔다.
     value_section = f'현재 값: "{claim}"' if claim else "현재 값: (없음, 약관에서 추출 필요)"
-    return (
-        f"[약관 원문]\n{document_text}\n\n"
-        f"[검증 대상]\n"
-        f"상품명: {name}\n"
-        f"항목명: {item.itemNm}\n"
-        f"항목 설명: {item.desc or '(없음)'}\n"
-        f"{value_section}"
-    )
+    return [
+        {
+            "type": "text",
+            "text": f"[약관 원문]\n{document_text}\n\n",
+            "prompt_cache_breakpoint": {"mode": "explicit"},
+        },
+        {
+            "type": "text",
+            "text": (
+                f"[검증 대상]\n"
+                f"상품명: {name}\n"
+                f"항목명: {item.itemNm}\n"
+                f"항목 설명: {item.desc or '(없음)'}\n"
+                f"{value_section}"
+            ),
+        },
+    ]
 
 
 def _build_split_prompt(item: TermsItem) -> str:
@@ -134,12 +144,13 @@ async def _split_claims(item: TermsItem) -> tuple[list[str | None], list[Structu
 
 
 async def _verify_one(
-    name: str, item: TermsItem, claim: str | None, document_text: str
+    name: str, hash_key: str, item: TermsItem, claim: str | None, document_text: str
 ) -> tuple[TermsItemResult, StructuredCompletion]:
     completion = await azure_openai_service.create_structured_completion(
         system_prompt=SYSTEM_PROMPT,
-        user_prompt=_build_user_prompt(document_text, name, item, claim),
+        user_prompt=_build_user_content(document_text, name, item, claim),
         json_schema=ITEM_VERIFICATION_SCHEMA,
+        prompt_cache_key=hash_key,
     )
     parsed = json.loads(completion.content)
     result = TermsItemResult(
@@ -172,6 +183,7 @@ def _aggregate_usage(metrics: list[StructuredCompletion]) -> UsageSummary:
         totalPromptTokens=sum(m.prompt_tokens for m in metrics),
         totalCompletionTokens=sum(m.completion_tokens for m in metrics),
         totalCachedTokens=sum(m.cached_tokens for m in metrics),
+        totalCacheWriteTokens=sum(m.cache_write_tokens for m in metrics),
         totalElapsedSeconds=round(total_elapsed_seconds, 2),
         avgElapsedSeconds=round(total_elapsed_seconds / count, 2) if count else 0.0,
     )
@@ -240,9 +252,10 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
         for claim in claims:
             claim_entries.append((name, item, claim))
 
-    # 2) 분해된 claim들을 termInfo 풀과 교차
+    # 2) 분해된 claim들을 termInfo 풀과 교차. 문서를 바깥 루프에 둬서 같은 문서에 대한
+    # 호출들이 리스트상 서로 붙어있게 한다 (prompt 캐시 재사용 텀을 최대한 짧게 유지).
     calls = [
-        (name, ref.ocrResltKey, item, claim) for name, item, claim in claim_entries for ref in unique_refs
+        (name, ref.ocrResltKey, item, claim) for ref in unique_refs for name, item, claim in claim_entries
     ]
 
     total_calls = len(calls)
@@ -255,7 +268,7 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
     ) -> tuple[TermsItemResult, StructuredCompletion]:
         nonlocal done_count
         async with semaphore:
-            result = await _verify_one(name, item, claim, text_by_hash[hash_key])
+            result = await _verify_one(name, hash_key, item, claim, text_by_hash[hash_key])
         done_count += 1
         if done_count % progress_step == 0 or done_count == total_calls:
             await terms_job_service.update_progress(request.rqtKey, done_count, total_calls)
