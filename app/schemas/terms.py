@@ -54,6 +54,9 @@ class TermsItemResult(BaseModel):
         default=None, description="evidence가 위치한 약관 조항 번호, 예: '제3조', '제3조 2항' (자동 검증되지 않은 참고용)"
     )
     reason: str | None = Field(default=None, description="PARTIAL_MATCH/MISMATCH일 때 설명. MATCHED 시 보통 null")
+    matchRate: int | None = Field(
+        default=None, description="현재 값과 llmValue의 의미적 일치율 (0~100). reason이 null이거나 llmValue가 null이면 null"
+    )
 
 
 class TermsDocumentItemsResult(BaseModel):

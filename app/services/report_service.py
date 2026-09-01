@@ -8,7 +8,7 @@ from openpyxl.utils import get_column_letter
 
 from app.schemas.terms import TermsVerificationResult
 
-ITEM_COLUMNS = ["itemNm", "value", "subClaim", "evidence", "page", "article", "reason", "status"]
+ITEM_COLUMNS = ["itemNm", "value", "subClaim", "evidence", "page", "article", "reason", "matchRate", "status"]
 STATUS_ORDER = ["MATCHED", "PARTIAL_MATCH", "MISMATCH"]
 STATUS_LABELS = {"MATCHED": "일치", "PARTIAL_MATCH": "부분 일치", "MISMATCH": "불일치"}
 HEADER_FILL_COLOR = "0000A5"
@@ -30,6 +30,7 @@ COLUMN_LABELS = {
     "page": "약관 내 페이지",
     "article": "조항",
     "reason": "차이 설명",
+    "matchRate": "일치율",
     "status": "검토 결과",
     "totalCnt": "총 검증 항목",
     "matchedCnt": "일치",
@@ -41,14 +42,14 @@ COLUMN_LABELS = {
 TOP_LEFT_COLUMNS = {"itemNm", "value", "subClaim", "evidence", "reason"}
 # 중앙+수직중앙 정렬: 짧은 값(숫자/코드성 텍스트) 컬럼들
 CENTER_COLUMNS = {
-    "page", "article",
+    "page", "article", "matchRate",
     "totalCnt", "matchedCnt", "partialMatchCnt", "mismatchCnt",
     "일치", "부분 일치", "불일치", "합계",
 }
 # 왼쪽+수직중앙 정렬: 짧은 식별용 텍스트(상품명/문서명) 컬럼들
 LEFT_CENTER_COLUMNS = {"name", "termNm"}
 
-COLUMN_WIDTHS = [22, 18, 18, 38, 12, 16, 32, 14]  # itemNm,value,subClaim,evidence,page,article,reason,status
+COLUMN_WIDTHS = [22, 18, 18, 38, 12, 16, 32, 12, 14]  # itemNm,value,subClaim,evidence,page,article,reason,matchRate,status
 SUMMARY_COLUMN_WIDTHS = [22, 16, 16, 16, 16, 24]  # name,totalCnt,matchedCnt,partialMatchCnt,mismatchCnt,overallResult
 MAX_COL = len(COLUMN_WIDTHS)
 SUMMARY_MAX_COL = len(SUMMARY_COLUMN_WIDTHS)

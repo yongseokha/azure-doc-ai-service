@@ -45,7 +45,8 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     4. article: evidence가 위치한 약관 조항 번호(예: "제3조", "제3조 2항")가 원문에 표기되어 있으면 기입하세요. evidence가 null이거나 조항을 특정할 수 없으면 null로 하세요.
     5. reason: 현재 값과 llmValue가 다른 경우 그 차이를 설명하세요. 현재 값과 llmValue가 완전히 같으면 null로 하세요.
        - 차이가 있다면 그 차이가 다음 중 무엇인지 구분해서 명시하세요: ① 현재 값에 llmValue와 다른(틀린) 내용이 있는 경우 → 어떤 부분이 근거상 확인되지 않는/틀린 내용인지 명시하세요. ② llmValue에 있는 내용이 현재 값에서 빠진(누락된) 경우 → 어떤 내용이 빠졌는지 명시하세요. 두 가지가 함께 있다면 둘 다 명시하세요. '누락되었습니다' 같은 표현은 실제로 빠진 내용에 대해서만 쓰고, 현재 값 자체가 틀린 경우에는 '틀린 내용입니다/근거에서 확인되지 않습니다' 등으로 명확히 구분해서 표현하세요.
-    6. status: 1~5에서 채운 내용을 종합해 다음 기준으로 최종 판정하세요. 세 상태는 서로 겹치지 않아야 합니다.
+    6. matchRate: reason이 null이거나(현재 값과 llmValue가 완전히 일치) llmValue가 null(비교 대상 자체가 없음)이면 matchRate도 null로 하세요. 그 외의 경우, 현재 값이 llmValue와 의미적으로 얼마나 일치하는지 0~100 사이의 정수(일치율)로 판단하세요 - 완전히 무관한 내용이면 0에 가깝게, 사소한 차이(디테일 하나만 다름)면 100에 가깝게 판단하세요.
+    7. status: 1~6에서 채운 내용을 종합해 다음 기준으로 최종 판정하세요. 세 상태는 서로 겹치지 않아야 합니다.
        - MATCHED: 현재 값이 llmValue와 완전히 일치 (틀린 내용도 없고 빠진 내용도 없음)
        - PARTIAL_MATCH: 현재 값에 llmValue와 다른(틀린) 내용은 없지만, llmValue에 있는 내용 중 일부가 현재 값에 빠져 있음 (현재 값에 포함된 내용 자체는 모두 맞음)
        - MISMATCH: 다음 중 하나 — (a) 현재 값에 llmValue와 다른(틀린) 내용이 하나라도 있음, (b) 현재 값 자체가 없음, (c) llmValue가 null(약관에 이 항목에 대한 내용 자체가 없음)""")
@@ -66,9 +67,13 @@ ITEM_VERIFICATION_SCHEMA = {
                 "description": "evidence가 위치한 약관 조항 번호, 예: '제3조', '제3조 2항'. 특정할 수 없으면 null",
             },
             "reason": {"type": ["string", "null"]},
+            "matchRate": {
+                "type": ["integer", "null"],
+                "description": "현재 값과 llmValue의 의미적 일치율 (0~100). reason이 null이거나 llmValue가 null이면 null",
+            },
             "status": {"type": "string", "enum": ["MATCHED", "PARTIAL_MATCH", "MISMATCH"]},
         },
-        "required": ["llmValue", "evidence", "page", "article", "reason", "status"],
+        "required": ["llmValue", "evidence", "page", "article", "reason", "matchRate", "status"],
         "additionalProperties": False,
     },
     "strict": True,
@@ -147,6 +152,7 @@ async def _verify_one(
         page=parsed.get("page"),
         article=parsed.get("article"),
         reason=parsed.get("reason"),
+        matchRate=parsed.get("matchRate"),
     )
     return result, completion
 
