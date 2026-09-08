@@ -1,4 +1,5 @@
 import asyncio
+import re
 from functools import lru_cache
 
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
@@ -10,6 +11,20 @@ from app.core.config import settings
 from app.exceptions.handlers import DocumentAnalysisTimeoutError, DocumentIntelligenceError
 
 DEFAULT_MODEL_ID = "prebuilt-layout"
+
+_PAGE_NUMBER_MARKER_RE = re.compile(r'<!-- PageNumber="[^"]*" -->\n*')
+_PAGE_BREAK_MARKER = "<!-- PageBreak -->"
+
+
+def renumber_pages(markdown: str) -> str:
+    """OCR이 인식한 인쇄 페이지 번호(PageNumber)는 페이지 하단에 붙어 있고 인식 실패도 잦아서,
+    각 페이지 본문 맨 위에 PageBreak 개수 기준의 물리적 페이지 순번을 다시 붙인다."""
+    text = _PAGE_NUMBER_MARKER_RE.sub("", markdown)
+    pages = text.split(_PAGE_BREAK_MARKER)
+    numbered_pages = [
+        f'<!-- PageNumber="{i}" -->\n{page.strip(chr(10))}' for i, page in enumerate(pages, start=1)
+    ]
+    return f"\n{_PAGE_BREAK_MARKER}\n".join(numbered_pages)
 
 
 @lru_cache

@@ -166,7 +166,7 @@ async def process_and_store(
         started_at = time.monotonic()
         result = await document_intelligence_service.analyze_document(content, model_id=DEFAULT_MODEL_ID)
         processing_duration_seconds = time.monotonic() - started_at
-        text = result.content or ""
+        text = document_intelligence_service.renumber_pages(result.content or "")
         page_count = len(result.pages or [])
         result_json = await asyncio.to_thread(lambda: json.dumps(result.as_dict(), ensure_ascii=False))
 
