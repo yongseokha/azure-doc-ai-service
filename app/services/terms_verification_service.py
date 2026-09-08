@@ -49,7 +49,8 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     7. status: 1~6에서 채운 내용을 종합해 다음 기준으로 최종 판정하세요. 세 상태는 서로 겹치지 않아야 합니다.
        - MATCHED: 현재 값이 llmValue와 완전히 일치 (틀린 내용도 없고 빠진 내용도 없음)
        - PARTIAL_MATCH: 현재 값에 llmValue와 다른(틀린) 내용은 없지만, llmValue에 있는 내용 중 일부가 현재 값에 빠져 있음 (현재 값에 포함된 내용 자체는 모두 맞음)
-       - MISMATCH: 다음 중 하나 — (a) 현재 값에 llmValue와 다른(틀린) 내용이 하나라도 있음, (b) 현재 값 자체가 없음, (c) llmValue가 null(약관에 이 항목에 대한 내용 자체가 없음)""")
+       - MISMATCH: 다음 중 하나 — (a) 현재 값에 llmValue와 다른(틀린) 내용이 하나라도 있음, (b) 현재 값 자체가 없음, (c) llmValue가 null(약관에 이 항목에 대한 내용 자체가 없음)
+    8. nameMatchRate: [검증 대상]의 상품명이 이 약관 문서에서 실제로 어떤 표현으로 지칭되는지 확인하고, 주어진 상품명과 그 표현이 의미적으로 얼마나 같은 대상을 가리키는지 0~100 사이의 정수로 판단하세요. 표현이 사실상 동일하면 100에 가깝게, 동의어·줄임말·일부 표현만 다르면 그만큼 낮게, 이 약관에서 해당 상품/서비스에 대한 언급 자체를 찾을 수 없으면 0으로 하세요.""")
 
 ITEM_VERIFICATION_SCHEMA = {
     "name": "terms_item_verification",
@@ -72,8 +73,12 @@ ITEM_VERIFICATION_SCHEMA = {
                 "description": "현재 값과 llmValue의 의미적 일치율 (0~100). reason이 null이거나 llmValue가 null이면 null",
             },
             "status": {"type": "string", "enum": ["MATCHED", "PARTIAL_MATCH", "MISMATCH"]},
+            "nameMatchRate": {
+                "type": "integer",
+                "description": "[검증 대상]의 상품명과 이 문서 내 실제 표현의 의미적 일치율 (0~100). 언급 자체가 없으면 0",
+            },
         },
-        "required": ["llmValue", "evidence", "page", "article", "reason", "matchRate", "status"],
+        "required": ["llmValue", "evidence", "page", "article", "reason", "matchRate", "status", "nameMatchRate"],
         "additionalProperties": False,
     },
     "strict": True,
@@ -145,7 +150,7 @@ async def _split_claims(item: TermsItem) -> tuple[list[str | None], list[Structu
 
 async def _verify_one(
     name: str, hash_key: str, item: TermsItem, claim: str | None, document_text: str
-) -> tuple[TermsItemResult, StructuredCompletion]:
+) -> tuple[TermsItemResult, int, StructuredCompletion]:
     completion = await azure_openai_service.create_structured_completion(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=_build_user_content(document_text, name, item, claim),
@@ -165,7 +170,7 @@ async def _verify_one(
         reason=parsed.get("reason"),
         matchRate=parsed.get("matchRate"),
     )
-    return result, completion
+    return result, parsed["nameMatchRate"], completion
 
 
 async def _load_documents(refs: list[DocumentReference]) -> dict[str, str]:
@@ -193,12 +198,13 @@ def _assemble(
     document_hash: list[DocumentReference],
     calls: list[tuple[str, str, TermsItem, str | None]],
     item_results: tuple[TermsItemResult, ...],
+    name_match_rates: tuple[int, ...],
 ) -> list[TermsNameResult]:
     ref_by_hash = {ref.ocrResltKey: ref for ref in document_hash}
 
-    by_name: dict[str, dict[str, list[TermsItemResult]]] = {}
-    for (name, hash_key, _item, _claim), result in zip(calls, item_results):
-        by_name.setdefault(name, {}).setdefault(hash_key, []).append(result)
+    by_name: dict[str, dict[str, list[tuple[TermsItemResult, int]]]] = {}
+    for (name, hash_key, _item, _claim), entry in zip(calls, zip(item_results, name_match_rates)):
+        by_name.setdefault(name, {}).setdefault(hash_key, []).append(entry)
 
     return [
         TermsNameResult(
@@ -208,9 +214,11 @@ def _assemble(
                     ocrResltKey=hash_key,
                     termNm=ref_by_hash[hash_key].termNm,
                     aplyDate=ref_by_hash[hash_key].aplyDate,
-                    items=items,
+                    # 같은 (name, 문서) 조합의 콜들은 전부 같은 질문(대상명 일치율)의 답이라 첫 값만 대표로 쓴다.
+                    nameMatchRate=entries[0][1],
+                    items=[item_result for item_result, _ in entries],
                 )
-                for hash_key, items in docs.items()
+                for hash_key, entries in docs.items()
             ],
         )
         for name, docs in by_name.items()
@@ -265,7 +273,7 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
 
     async def _bounded_verify(
         name: str, hash_key: str, item: TermsItem, claim: str | None
-    ) -> tuple[TermsItemResult, StructuredCompletion]:
+    ) -> tuple[TermsItemResult, int, StructuredCompletion]:
         nonlocal done_count
         async with semaphore:
             result = await _verify_one(name, hash_key, item, claim, text_by_hash[hash_key])
@@ -277,8 +285,8 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
     tasks = [asyncio.create_task(_bounded_verify(*call)) for call in calls]
     outcomes = await _run_bounded(tasks)
 
-    item_results, metrics = zip(*outcomes) if outcomes else ((), ())
-    names_result = _assemble(unique_refs, calls, item_results)
+    item_results, name_match_rates, metrics = zip(*outcomes) if outcomes else ((), (), ())
+    names_result = _assemble(unique_refs, calls, item_results, name_match_rates)
     return names_result, _aggregate_usage(list(metrics) + split_metrics)
 
 

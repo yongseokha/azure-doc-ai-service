@@ -23,6 +23,7 @@ STATUS_STYLE = {
 COLUMN_LABELS = {
     "name": "대상명",
     "termNm": "약관명",
+    "nameMatchRate": "상품명 일치율",
     "itemNm": "지식 항목",
     "value": "상품 지식",
     "subClaim": "상품 지식 단위",
@@ -42,7 +43,7 @@ COLUMN_LABELS = {
 TOP_LEFT_COLUMNS = {"itemNm", "value", "subClaim", "evidence", "reason"}
 # 중앙+수직중앙 정렬: 짧은 값(숫자/코드성 텍스트) 컬럼들
 CENTER_COLUMNS = {
-    "page", "article", "matchRate",
+    "page", "article", "matchRate", "nameMatchRate",
     "totalCnt", "matchedCnt", "partialMatchCnt", "mismatchCnt",
     "일치", "부분 일치", "불일치", "합계",
 }
@@ -70,18 +71,20 @@ def _flatten(result: TermsVerificationResult) -> pd.DataFrame:
         {
             "name": name_result.name,
             "termNm": doc_result.termNm,
+            "nameMatchRate": doc_result.nameMatchRate,
             **{col: getattr(item, col) for col in ITEM_COLUMNS},
         }
         for name_result in result.data
         for doc_result in name_result.documents
         for item in doc_result.items
     ]
-    return pd.DataFrame(rows, columns=["name", "termNm", *ITEM_COLUMNS])
+    return pd.DataFrame(rows, columns=["name", "termNm", "nameMatchRate", *ITEM_COLUMNS])
 
 
-def _grouped_stats(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+def _grouped_stats(df: pd.DataFrame, group_cols: list[str], extra_cols: list[str] | None = None) -> pd.DataFrame:
+    extra_cols = extra_cols or []
     if df.empty:
-        return pd.DataFrame(columns=[*group_cols, *STATUS_LABELS.values(), "합계"])
+        return pd.DataFrame(columns=[*group_cols, *extra_cols, *STATUS_LABELS.values(), "합계"])
     pivot = (
         df.groupby(group_cols, sort=False)["status"]
         .value_counts()
@@ -90,7 +93,13 @@ def _grouped_stats(df: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
     )
     pivot["합계"] = pivot.sum(axis=1)
     pivot = pivot.rename(columns=STATUS_LABELS)
-    return pivot.reset_index()
+    stats = pivot.reset_index()
+    if not extra_cols:
+        return stats
+    # extra_cols는 그룹당 이미 고정값(예: 대상명 일치율)이라 카운트 집계가 아니라 첫 값만 가져온다.
+    extras = df.groupby(group_cols, sort=False)[extra_cols].first().reset_index()
+    stats = stats.merge(extras, on=group_cols)
+    return stats[[*group_cols, *extra_cols, *[col for col in stats.columns if col not in {*group_cols, *extra_cols}]]]
 
 
 def _build_item_row(item) -> dict:
@@ -140,6 +149,7 @@ def build_result_payload(result: TermsVerificationResult, verified_at: str) -> d
                     "ocrResltKey": doc_result.ocrResltKey,
                     "termNm": doc_result.termNm,
                     "aplyDate": doc_result.aplyDate,
+                    "nameMatchRate": doc_result.nameMatchRate,
                     **_stats_from_items(doc_result.items),
                     "items": [item.model_dump() for item in doc_result.items],
                 }
@@ -337,7 +347,8 @@ def _write_detailed_stats(ws, df: pd.DataFrame, start_row: int, max_col: int) ->
     row = _write_section_title(ws, start_row, "상세 통계", max_col)
     row = _write_table(ws, _grouped_stats(df, ["name"]), row, max_col, "상품명별 통계", bold_columns=frozenset({"name"}))
     row = _write_table(
-        ws, _grouped_stats(df, ["name", "termNm"]), row, max_col, "문서별 통계", bold_columns=frozenset({"name"})
+        ws, _grouped_stats(df, ["name", "termNm"], extra_cols=["nameMatchRate"]), row, max_col, "문서별 통계",
+        bold_columns=frozenset({"name"})
     )
     return row
 
