@@ -63,7 +63,9 @@ class TermsDocumentItemsResult(BaseModel):
     ocrResltKey: str
     termNm: str
     aplyDate: str | None = Field(default=None, description="약관 시행일. 이 필드 추가 이전에 저장된 결과는 null")
-    nameMatchRate: int = Field(description="대상명과 이 문서 내 실제 표현의 의미적 일치율 (0~100). 언급 자체가 없으면 0")
+    nameMatchRate: int | None = Field(
+        default=None, description="대상명과 이 문서 내 실제 표현의 의미적 일치율 (0~100). 언급 자체가 없으면 0. 이 필드 추가 이전에 저장된 결과는 null"
+    )
     items: list[TermsItemResult]
 
 
