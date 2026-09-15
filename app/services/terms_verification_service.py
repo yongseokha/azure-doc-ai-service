@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import textwrap
 from datetime import datetime
 
@@ -23,6 +24,8 @@ from app.services import (
     terms_job_service,
 )
 from app.services.azure_openai_service import StructuredCompletion
+
+logger = logging.getLogger(__name__)
 
 RESULT_ROOT = "terms-verification"
 
@@ -280,7 +283,12 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
             result = await _verify_one(name, hash_key, item, claim, text_by_hash[hash_key])
         done_count += 1
         if done_count % progress_step == 0 or done_count == total_calls:
-            await terms_job_service.update_progress(request.rqtKey, done_count, total_calls)
+            # 진행률 갱신은 정보성 부수 효과일 뿐이라, 여기서 실패해도(예: Search 연결 문제)
+            # 이미 끝난 검증 자체를 job 실패로 만들면 안 된다 - 로그만 남기고 계속 진행한다.
+            try:
+                await terms_job_service.update_progress(request.rqtKey, done_count, total_calls)
+            except Exception:
+                logger.warning("진행률 업데이트 실패 (검증 자체는 계속 진행)", exc_info=True)
         return result
 
     tasks = [asyncio.create_task(_bounded_verify(*call)) for call in calls]
