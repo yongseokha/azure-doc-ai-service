@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import textwrap
 from datetime import datetime
 
@@ -301,10 +302,20 @@ async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsName
 
 REPORT_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+_INVALID_FILENAME_CHARS = re.compile(r'["\\/:|<>*?\x00-\x1f]')
+
+
+def _sanitize_filename_part(text: str) -> str:
+    """Azure Files 파일/디렉터리 이름에 못 쓰는 문자(" \\ / : | < > * ? 및 제어문자)를 밑줄로 치환한다.
+    지식명처럼 외부에서 그대로 받은 값이 파일 경로에 들어갈 때, 그 안에 이런 문자가 섞여 있으면
+    Azure Storage가 InvalidResourceName으로 업로드 자체를 거부한다."""
+    return _INVALID_FILENAME_CHARS.sub("_", text)
+
 
 def _build_report_filename(created_date: str, knwlg_info_id: int | None, knwlg_nm: str | None) -> str:
     """생성일(YYYYMMDD)_지식ID_지식명.xlsx 형식의 리포트 파일명을 만든다."""
-    return f"{created_date}_{knwlg_info_id if knwlg_info_id is not None else ''}_{knwlg_nm or ''}.xlsx"
+    safe_knwlg_nm = _sanitize_filename_part(knwlg_nm) if knwlg_nm else ""
+    return f"{created_date}_{knwlg_info_id if knwlg_info_id is not None else ''}_{safe_knwlg_nm}.xlsx"
 
 
 def _build_callback_data(
@@ -338,7 +349,10 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
         return
 
     result = TermsVerificationResult(knwlgNm=request.knwlgNm, data=names_result)
-    result_path = f"{RESULT_ROOT}/{request.rqtKey}/result.json"
+    # rqtKey도 클라이언트가 만든 값이라 파일 경로에 못 쓰는 문자가 섞여 있을 수 있다.
+    # Search 문서 키(request.rqtKey)는 원본 그대로 쓰고, 파일 경로에만 안전한 버전을 쓴다.
+    safe_rqt_key = _sanitize_filename_part(request.rqtKey)
+    result_path = f"{RESULT_ROOT}/{safe_rqt_key}/result.json"
     await file_storage_service.upload_file(
         result_path, result.model_dump_json().encode("utf-8"), content_type="application/json"
     )
@@ -349,7 +363,7 @@ async def process_and_callback(request: TermsVerificationRequest) -> None:
 
     report_bytes = await asyncio.to_thread(report_service.build_report_xlsx, result, verified_at)
     report_filename = _build_report_filename(now.strftime("%Y%m%d"), request.knwlgInfoId, request.knwlgNm)
-    report_path = f"{RESULT_ROOT}/{request.rqtKey}/{report_filename}"
+    report_path = f"{RESULT_ROOT}/{safe_rqt_key}/{report_filename}"
     await file_storage_service.upload_file(
         report_path,
         report_bytes,
