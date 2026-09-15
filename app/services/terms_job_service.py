@@ -1,8 +1,9 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
+from azure.core.exceptions import HttpResponseError, ResourceNotFoundError, ServiceRequestError
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient
 from azure.search.documents.indexes.models import SearchFieldDataType, SearchIndex, SimpleField
@@ -12,6 +13,9 @@ from app.exceptions.handlers import SearchIndexError
 from app.schemas.terms import TermsVerificationRequest, UsageSummary
 
 STALE_PROCESSING_THRESHOLD = timedelta(hours=2)
+
+MAX_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = [1, 2, 4]
 
 
 @lru_cache
@@ -101,17 +105,31 @@ def is_stale(updated_at) -> bool:
 
 
 async def _merge_or_upload(document: dict) -> None:
-    try:
-        await get_search_client().merge_or_upload_documents([document])
-    except HttpResponseError as exc:
-        raise SearchIndexError(str(exc)) from exc
+    """일시적인 연결 끊김(ServiceRequestError)은 몇 번 재시도한다.
+    서버가 실제로 에러 응답을 준 경우(HttpResponseError)는 재시도해도 소용없으니 바로 실패 처리한다."""
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            await get_search_client().merge_or_upload_documents([document])
+            return
+        except HttpResponseError as exc:
+            raise SearchIndexError(str(exc)) from exc
+        except ServiceRequestError as exc:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise SearchIndexError(str(exc)) from exc
+            await asyncio.sleep(RETRY_BACKOFF_SECONDS[attempt])
 
 
 async def get_job(rqt_key: str) -> dict | None:
-    try:
-        return await get_search_client().get_document(key=rqt_key)
-    except ResourceNotFoundError:
-        return None
+    """일시적인 연결 끊김(ServiceRequestError)은 몇 번 재시도한다."""
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            return await get_search_client().get_document(key=rqt_key)
+        except ResourceNotFoundError:
+            return None
+        except ServiceRequestError:
+            if attempt == MAX_ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(RETRY_BACKOFF_SECONDS[attempt])
 
 
 async def claim_job(request: TermsVerificationRequest) -> None:
