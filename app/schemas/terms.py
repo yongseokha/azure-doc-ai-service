@@ -17,11 +17,21 @@ class DocumentReference(BaseModel):
     termNm: str = Field(examples=["KT 요고 시리즈 이용약관"], description="표시용 약관명 (처리 로직에는 사용되지 않음)")
     aplyDate: str = Field(examples=["2026-01-01"], description="약관 시행일 (처리 로직에는 사용되지 않음, 보관/표시용)")
 
+    @field_validator("termNm", "aplyDate", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str) -> str:
+        return _reject_personal_information(value)
+
 
 class TermsItem(BaseModel):
     itemNm: str = Field(examples=["이용 가능 고객"], description="검증/추출 대상 항목명")
     value: str | None = Field(default=None, examples=["개인, 미성년자, 외국인"], description="검증할 값. 없으면 약관에서 추출")
     desc: str | None = Field(default=None, description="itemNm 필드에 대한 설명")
+
+    @field_validator("itemNm", mode="after")
+    @classmethod
+    def _no_personal_information_itemnm(cls, value: str) -> str:
+        return _reject_personal_information(value)
 
     @field_validator("value", "desc", mode="after")
     @classmethod
