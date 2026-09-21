@@ -3,6 +3,13 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.base import ApiRequest
+from app.utils.common import is_personal_information
+
+
+def _reject_personal_information(value: str | None) -> str | None:
+    if is_personal_information(value or ""):
+        raise ValueError("개인정보로 의심되는 값은 입력할 수 없습니다.")
+    return value
 
 
 class DocumentReference(BaseModel):
@@ -26,10 +33,20 @@ class TermsItem(BaseModel):
             return None
         return value
 
+    @field_validator("value", "desc", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str | None) -> str | None:
+        return _reject_personal_information(value)
+
 
 class TermsNameGroup(BaseModel):
     name: str = Field(examples=["요고 69"], description="검증 대상 상품명")
     items: list[TermsItem] = Field(min_length=1)
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str) -> str:
+        return _reject_personal_information(value)
 
 
 class TermsVerificationRequest(ApiRequest):
@@ -38,6 +55,11 @@ class TermsVerificationRequest(ApiRequest):
     knwlgInfoId: int = Field(description="지식 정보 ID (콜백 본문에 받은 그대로 실려감)")
     termVrfSeq: int = Field(description="약관 버전 순번 (콜백 본문에 받은 그대로 실려감)")
     knwlgNm: str = Field(examples=["KT 요고 시리즈"], description="지식명 (콜백/리포트에 그대로 표시됨)")
+
+    @field_validator("knwlgNm", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str) -> str:
+        return _reject_personal_information(value)
 
 
 class TermsItemResult(BaseModel):
