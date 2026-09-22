@@ -56,7 +56,10 @@ class DocumentNotReadyError(AppException):
 
 class AzureOpenAIError(AppException):
     def __init__(self, detail: str):
-        super().__init__(f"Azure OpenAI 호출 중 오류가 발생했습니다: {detail}", status_code=502)
+        # Azure OpenAI SDK 에러 메시지는 잘못된 요청을 그대로 에코하는 경우가 있어(예: messages 배열 원문 포함),
+        # detail을 콜백/응답 메시지에 그대로 실으면 시스템/유저 프롬프트가 외부로 노출될 수 있다.
+        # detail은 호출부에서 로그로만 남기고, 외부로 나가는 메시지는 고정 문구로 둔다.
+        super().__init__("Azure OpenAI 호출 중 오류가 발생했습니다.", status_code=502)
 
 
 def _envelope(status_code: int, status_msg: str) -> dict:

@@ -1,3 +1,4 @@
+import logging
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -6,6 +7,8 @@ from openai import APIError, AsyncAzureOpenAI
 
 from app.core.config import settings
 from app.exceptions.handlers import AzureOpenAIError
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache
@@ -64,6 +67,9 @@ async def create_structured_completion(
             extra_body={"prompt_cache_key": prompt_cache_key} if prompt_cache_key else None,
         )
     except APIError as exc:
+        # exc 메시지에는 요청에 실었던 system/user 프롬프트 원문이 그대로 에코되는 경우가 있어
+        # 서버 로그에만 남기고, 외부로는 AzureOpenAIError의 고정 메시지만 나간다.
+        logger.error("Azure OpenAI 호출 실패", exc_info=True)
         raise AzureOpenAIError(str(exc)) from exc
     elapsed_ms = (time.monotonic() - start) * 1000
 
