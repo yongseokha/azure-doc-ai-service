@@ -25,6 +25,7 @@ from app.services import (
     terms_job_service,
 )
 from app.services.azure_openai_service import StructuredCompletion
+from app.utils.rate_limiter import SlidingWindowRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,12 @@ RESULT_ROOT = "terms-verification"
 # job이 여러 개 동시에 들어와도 Azure OpenAI 호출은 한 번에 한 job씩만 나가도록 직렬화한다.
 # (job마다 세마포어를 따로 두면 job 수만큼 동시 호출이 배로 늘어나 rate limit에 취약해진다.)
 _job_lock = asyncio.Lock()
+
+# job(rqtKey) 하나가 짧은 시간에 만들어내는 LLM 호출이 분당 60회를 넘지 않도록 조절한다.
+# (거부가 아니라 대기: 한도를 넘으면 자리가 날 때까지 기다렸다가 계속 진행한다.)
+_llm_rate_limiter = SlidingWindowRateLimiter(
+    max_calls=settings.terms_verification_llm_max_calls_per_minute, period_seconds=60.0
+)
 
 SYSTEM_PROMPT = textwrap.dedent("""\
     당신은 약관 문서를 기준으로 상품 항목 데이터를 검증하는 어시스턴트입니다. 반드시 주어진 약관 원문 내용만을 근거로 판단하고, 원문에 없는 내용은 추측하지 마세요.
@@ -140,10 +147,11 @@ def _build_split_prompt(item: TermsItem) -> str:
     )
 
 
-async def _split_claims(item: TermsItem) -> tuple[list[str | None], list[StructuredCompletion]]:
+async def _split_claims(rqtKey: str, item: TermsItem) -> tuple[list[str | None], list[StructuredCompletion]]:
     """item.value를 독립적으로 검증 가능한 조건 단위로 분해한다. value가 없으면 분해 대상이 아니다."""
     if item.value is None:
         return [None], []
+    await _llm_rate_limiter.acquire(rqtKey)
     completion = await azure_openai_service.create_structured_completion(
         system_prompt=CLAIM_SPLIT_SYSTEM_PROMPT,
         user_prompt=_build_split_prompt(item),
@@ -154,8 +162,9 @@ async def _split_claims(item: TermsItem) -> tuple[list[str | None], list[Structu
 
 
 async def _verify_one(
-    name: str, hash_key: str, item: TermsItem, claim: str | None, document_text: str
+    rqtKey: str, name: str, hash_key: str, item: TermsItem, claim: str | None, document_text: str
 ) -> tuple[TermsItemResult, int, StructuredCompletion]:
+    await _llm_rate_limiter.acquire(rqtKey)
     completion = await azure_openai_service.create_structured_completion(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=_build_user_content(document_text, name, item, claim),
@@ -242,62 +251,66 @@ async def _run_bounded(tasks: list[asyncio.Task]) -> tuple:
 
 
 async def _verify_all(request: TermsVerificationRequest) -> tuple[list[TermsNameResult], UsageSummary]:
-    # ocrResltKey 기준으로 중복 제거 - 같은 문서가 두 번 오면 LLM 호출도 두 번 실행되는 걸 막는다.
-    unique_refs = list({ref.ocrResltKey: ref for ref in request.termInfo}.values())
-    text_by_hash = await _load_documents(unique_refs)
+    try:
+        # ocrResltKey 기준으로 중복 제거 - 같은 문서가 두 번 오면 LLM 호출도 두 번 실행되는 걸 막는다.
+        unique_refs = list({ref.ocrResltKey: ref for ref in request.termInfo}.values())
+        text_by_hash = await _load_documents(unique_refs)
 
-    semaphore = asyncio.Semaphore(settings.terms_verification_concurrency)
+        semaphore = asyncio.Semaphore(settings.terms_verification_concurrency)
 
-    # 1) name+item 단위로 분해 (termInfo와 무관하게 1번씩만 - 문서 수만큼 중복 분해하지 않는다)
-    item_entries = [(group.name, item) for group in request.data for item in group.items]
+        # 1) name+item 단위로 분해 (termInfo와 무관하게 1번씩만 - 문서 수만큼 중복 분해하지 않는다)
+        item_entries = [(group.name, item) for group in request.data for item in group.items]
 
-    async def _bounded_split(item: TermsItem) -> tuple[list[str | None], list[StructuredCompletion]]:
-        async with semaphore:
-            return await _split_claims(item)
+        async def _bounded_split(item: TermsItem) -> tuple[list[str | None], list[StructuredCompletion]]:
+            async with semaphore:
+                return await _split_claims(request.rqtKey, item)
 
-    split_tasks = [asyncio.create_task(_bounded_split(item)) for _, item in item_entries]
-    split_outcomes = await _run_bounded(split_tasks)
+        split_tasks = [asyncio.create_task(_bounded_split(item)) for _, item in item_entries]
+        split_outcomes = await _run_bounded(split_tasks)
 
-    claim_entries: list[tuple[str, TermsItem, str | None]] = []
-    split_metrics: list[StructuredCompletion] = []
-    for (name, item), (claims, completions) in zip(item_entries, split_outcomes):
-        split_metrics.extend(completions)
-        for claim in claims:
-            claim_entries.append((name, item, claim))
+        claim_entries: list[tuple[str, TermsItem, str | None]] = []
+        split_metrics: list[StructuredCompletion] = []
+        for (name, item), (claims, completions) in zip(item_entries, split_outcomes):
+            split_metrics.extend(completions)
+            for claim in claims:
+                claim_entries.append((name, item, claim))
 
-    # 2) 분해된 claim들을 termInfo 풀과 교차. 문서를 바깥 루프에 둬서 같은 문서에 대한
-    # 호출들이 리스트상 서로 붙어있게 한다 (prompt 캐시 재사용 텀을 최대한 짧게 유지).
-    calls = [
-        (name, ref.ocrResltKey, item, claim) for ref in unique_refs for name, item, claim in claim_entries
-    ]
+        # 2) 분해된 claim들을 termInfo 풀과 교차. 문서를 바깥 루프에 둬서 같은 문서에 대한
+        # 호출들이 리스트상 서로 붙어있게 한다 (prompt 캐시 재사용 텀을 최대한 짧게 유지).
+        calls = [
+            (name, ref.ocrResltKey, item, claim) for ref in unique_refs for name, item, claim in claim_entries
+        ]
 
-    total_calls = len(calls)
-    progress_step = max(1, total_calls // 20)  # 전체 구간에서 약 20번만 업데이트하도록 스로틀
-    done_count = 0
-    await terms_job_service.update_progress(request.rqtKey, 0, total_calls)
+        total_calls = len(calls)
+        progress_step = max(1, total_calls // 20)  # 전체 구간에서 약 20번만 업데이트하도록 스로틀
+        done_count = 0
+        await terms_job_service.update_progress(request.rqtKey, 0, total_calls)
 
-    async def _bounded_verify(
-        name: str, hash_key: str, item: TermsItem, claim: str | None
-    ) -> tuple[TermsItemResult, int, StructuredCompletion]:
-        nonlocal done_count
-        async with semaphore:
-            result = await _verify_one(name, hash_key, item, claim, text_by_hash[hash_key])
-        done_count += 1
-        if done_count % progress_step == 0 or done_count == total_calls:
-            # 진행률 갱신은 정보성 부수 효과일 뿐이라, 여기서 실패해도(예: Search 연결 문제)
-            # 이미 끝난 검증 자체를 job 실패로 만들면 안 된다 - 로그만 남기고 계속 진행한다.
-            try:
-                await terms_job_service.update_progress(request.rqtKey, done_count, total_calls)
-            except Exception:
-                logger.warning("진행률 업데이트 실패 (검증 자체는 계속 진행)", exc_info=True)
-        return result
+        async def _bounded_verify(
+            name: str, hash_key: str, item: TermsItem, claim: str | None
+        ) -> tuple[TermsItemResult, int, StructuredCompletion]:
+            nonlocal done_count
+            async with semaphore:
+                result = await _verify_one(request.rqtKey, name, hash_key, item, claim, text_by_hash[hash_key])
+            done_count += 1
+            if done_count % progress_step == 0 or done_count == total_calls:
+                # 진행률 갱신은 정보성 부수 효과일 뿐이라, 여기서 실패해도(예: Search 연결 문제)
+                # 이미 끝난 검증 자체를 job 실패로 만들면 안 된다 - 로그만 남기고 계속 진행한다.
+                try:
+                    await terms_job_service.update_progress(request.rqtKey, done_count, total_calls)
+                except Exception:
+                    logger.warning("진행률 업데이트 실패 (검증 자체는 계속 진행)", exc_info=True)
+            return result
 
-    tasks = [asyncio.create_task(_bounded_verify(*call)) for call in calls]
-    outcomes = await _run_bounded(tasks)
+        tasks = [asyncio.create_task(_bounded_verify(*call)) for call in calls]
+        outcomes = await _run_bounded(tasks)
 
-    item_results, name_match_rates, metrics = zip(*outcomes) if outcomes else ((), (), ())
-    names_result = _assemble(unique_refs, calls, item_results, name_match_rates)
-    return names_result, _aggregate_usage(list(metrics) + split_metrics)
+        item_results, name_match_rates, metrics = zip(*outcomes) if outcomes else ((), (), ())
+        names_result = _assemble(unique_refs, calls, item_results, name_match_rates)
+        return names_result, _aggregate_usage(list(metrics) + split_metrics)
+    finally:
+        # job이 끝나면(성공/실패 무관) 이 rqtKey의 rate limit 이력을 정리해서 메모리가 계속 쌓이지 않게 한다.
+        _llm_rate_limiter.forget(request.rqtKey)
 
 
 REPORT_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
