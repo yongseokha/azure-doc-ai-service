@@ -10,6 +10,22 @@ from app.services import file_storage_service, terms_job_service, terms_verifica
 router = APIRouter(prefix="/terms", tags=["terms"])
 
 
+async def _get_job_of_type(rqtKey: str, job_type: str) -> dict | None:
+    """같은 인덱스에 두 종류의 job이 섞여 있으므로, 다른 종류 job의 rqtKey는 없는 것으로 취급한다."""
+    job = await terms_job_service.get_job(rqtKey)
+    if job is None or terms_job_service.job_type_of(job) != job_type:
+        return None
+    return job
+
+
+async def _ensure_rqt_key_not_used_by_other_type(rqtKey: str, job_type: str) -> dict | None:
+    """rqtKey가 다른 종류의 job에서 이미 쓰였으면 거부한다 (덮어쓰면 기존 job 기록이 깨진다)."""
+    job = await terms_job_service.get_job(rqtKey)
+    if job is not None and terms_job_service.job_type_of(job) != job_type:
+        raise InvalidRequestError("다른 종류의 검증 요청에서 이미 사용된 rqtKey입니다.")
+    return job
+
+
 @router.post(
     "/verify",
     response_model=ApiResponse[None],
@@ -29,7 +45,7 @@ async def verify_terms(
     - 항목 하나라도 처리에 실패하면 전체 요청이 실패로 처리되고, 실패 콜백이 전송됩니다.
     - 같은 `rqtKey`로 이미 처리 중인 요청이 있으면 재처리하지 않고, 완료된 요청이면 저장된 결과를 다시 콜백으로 보냅니다.
     """
-    job = await terms_job_service.get_job(request.rqtKey)
+    job = await _ensure_rqt_key_not_used_by_other_type(request.rqtKey, terms_job_service.JOB_TYPE_VERIFY)
 
     if job is not None and job["status"] == "processing" and not terms_job_service.is_stale(job["updated_at"]):
         response.status_code = 202
@@ -55,7 +71,7 @@ async def verify_terms(
     summary="약관 검증 job 상태/결과 조회",
 )
 async def get_verification_status(rqtKey: str) -> ApiResponse[dict]:
-    job = await terms_job_service.get_job(rqtKey)
+    job = await _get_job_of_type(rqtKey, terms_job_service.JOB_TYPE_VERIFY)
     if job is None:
         raise DocumentNotFoundError()
 
@@ -65,16 +81,7 @@ async def get_verification_status(rqtKey: str) -> ApiResponse[dict]:
         summary = terms_verification_service.build_stored_summary(job, stored)
         return ApiResponse[dict](statusCode=200, statusMsg="OK", result=summary)
 
-    return ApiResponse[dict](
-        statusCode=200,
-        statusMsg="OK",
-        result={
-            "status": job["status"],
-            "progressDone": job.get("progress_done"),
-            "progressTotal": job.get("progress_total"),
-            "errorMessage": job.get("error_message"),
-        },
-    )
+    return ApiResponse[dict](statusCode=200, statusMsg="OK", result=_progress_result(job))
 
 
 @router.post(
@@ -83,7 +90,7 @@ async def get_verification_status(rqtKey: str) -> ApiResponse[dict]:
     summary="완료된 job의 저장된 결과를 콜백으로 재전송 (재검증 없음)",
 )
 async def resend_callback(rqtKey: str, background_tasks: BackgroundTasks) -> ApiResponse[None]:
-    job = await terms_job_service.get_job(rqtKey)
+    job = await _get_job_of_type(rqtKey, terms_job_service.JOB_TYPE_VERIFY)
     if job is None:
         raise DocumentNotFoundError()
     if job["status"] != "completed":
@@ -92,3 +99,12 @@ async def resend_callback(rqtKey: str, background_tasks: BackgroundTasks) -> Api
     background_tasks.add_task(terms_verification_service.resend_stored_result, job)
 
     return ApiResponse[None](statusCode=200, statusMsg="재전송을 시작했습니다.", result=None)
+
+
+def _progress_result(job: dict) -> dict:
+    return {
+        "status": job["status"],
+        "progressDone": job.get("progress_done"),
+        "progressTotal": job.get("progress_total"),
+        "errorMessage": job.get("error_message"),
+    }

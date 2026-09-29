@@ -10,9 +10,13 @@ from azure.search.documents.indexes.models import SearchFieldDataType, SearchInd
 
 from app.core.config import settings
 from app.exceptions.handlers import SearchIndexError
-from app.schemas.terms import TermsVerificationRequest, UsageSummary
+from app.schemas.terms import TermsAskVerificationRequest, TermsVerificationRequest, UsageSummary
 
 STALE_PROCESSING_THRESHOLD = timedelta(hours=2)
+
+# 같은 인덱스에 두 종류의 job이 섞여 저장된다. job_type 필드 추가 이전에 저장된 job은 null이며 JOB_TYPE_VERIFY로 간주한다.
+JOB_TYPE_VERIFY = "verify"
+JOB_TYPE_VERIFY_ASK = "verify_ask"
 
 MAX_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = [1, 2, 4]
@@ -49,6 +53,7 @@ def _build_index() -> SearchIndex:
         name=settings.azure_search_terms_index_name,
         fields=[
             SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+            SimpleField(name="job_type", type=SearchFieldDataType.String, filterable=True),
             SimpleField(name="user_id", type=SearchFieldDataType.String),
             SimpleField(name="inf_id", type=SearchFieldDataType.String),
             SimpleField(name="status", type=SearchFieldDataType.String, filterable=True),
@@ -98,6 +103,10 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def job_type_of(job: dict) -> str:
+    return job.get("job_type") or JOB_TYPE_VERIFY
+
+
 def is_stale(updated_at) -> bool:
     if isinstance(updated_at, str):
         updated_at = datetime.fromisoformat(updated_at)
@@ -139,6 +148,7 @@ async def claim_job(request: TermsVerificationRequest) -> None:
     await _merge_or_upload(
         {
             "id": request.rqtKey,
+            "job_type": JOB_TYPE_VERIFY,
             "user_id": request.userId,
             "inf_id": request.infId,
             "status": "processing",
@@ -147,6 +157,31 @@ async def claim_job(request: TermsVerificationRequest) -> None:
             "document_count": len(request.termInfo),
             "names_count": len(request.data),
             "item_count": item_count,
+            "knwlg_info_id": request.knwlgInfoId,
+            "term_vrf_seq": request.termVrfSeq,
+            "callback_status": "pending",
+            "error_message": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+
+async def claim_ask_job(request: TermsAskVerificationRequest) -> None:
+    """검증 원문 기반 약관 검증 job을 처리 상태로 (재)기록한다. item_count는 name × vrfItem 조합 수다."""
+    now = _now_iso()
+    await _merge_or_upload(
+        {
+            "id": request.rqtKey,
+            "job_type": JOB_TYPE_VERIFY_ASK,
+            "user_id": request.userId,
+            "inf_id": request.infId,
+            "status": "processing",
+            "progress_done": None,
+            "progress_total": None,
+            "document_count": len(request.termInfo),
+            "names_count": len(request.data),
+            "item_count": len(request.data) * len(request.vrfItem),
             "knwlg_info_id": request.knwlgInfoId,
             "term_vrf_seq": request.termVrfSeq,
             "callback_status": "pending",
