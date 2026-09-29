@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     terms_verification_concurrency: int = 5
     terms_verification_llm_max_calls_per_minute: int = 59
     terms_verification_callback_url: str
+    # 미설정이면 terms_verification_callback_url을 그대로 쓴다.
+    terms_ask_verification_callback_url: str | None = None
 
     max_upload_size_mb: int = 20
     document_intelligence_timeout_seconds: int = 300
