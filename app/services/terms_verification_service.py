@@ -25,21 +25,12 @@ from app.services import (
     terms_job_service,
 )
 from app.services.azure_openai_service import StructuredCompletion
-from app.utils.rate_limiter import SlidingWindowRateLimiter
+from app.services.llm_throttle import job_lock as _job_lock
+from app.services.llm_throttle import llm_rate_limiter as _llm_rate_limiter
 
 logger = logging.getLogger(__name__)
 
 RESULT_ROOT = "terms-verification"
-
-# job이 여러 개 동시에 들어와도 Azure OpenAI 호출은 한 번에 한 job씩만 나가도록 직렬화한다.
-# (job마다 세마포어를 따로 두면 job 수만큼 동시 호출이 배로 늘어나 rate limit에 취약해진다.)
-_job_lock = asyncio.Lock()
-
-# job(rqtKey) 하나가 짧은 시간에 만들어내는 LLM 호출이 분당 60회를 넘지 않도록 조절한다.
-# (거부가 아니라 대기: 한도를 넘으면 자리가 날 때까지 기다렸다가 계속 진행한다.)
-_llm_rate_limiter = SlidingWindowRateLimiter(
-    max_calls=settings.terms_verification_llm_max_calls_per_minute, period_seconds=60.0
-)
 
 SYSTEM_PROMPT = textwrap.dedent("""\
     당신은 약관 문서를 기준으로 상품 항목 데이터를 검증하는 어시스턴트입니다. 반드시 주어진 약관 원문 내용만을 근거로 판단하고, 원문에 없는 내용은 추측하지 마세요.
