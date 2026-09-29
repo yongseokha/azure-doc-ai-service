@@ -120,3 +120,109 @@ class UsageSummary(BaseModel):
 class TermsVerificationResult(BaseModel):
     knwlgNm: str | None = Field(default=None, description="지식명. 이 필드 추가 이전에 저장된 결과는 null")
     data: list[TermsNameResult]
+
+
+# ---- 검증 원문 기반 약관 검증 (/terms/verify-ask) ----
+
+
+class SourceItem(BaseModel):
+    itemNm: str = Field(examples=["초이스 상품여부"], description="검증 원문의 항목명")
+    value: str | None = Field(default=None, examples=["Y"], description="검증 원문의 항목값")
+
+    @field_validator("itemNm", mode="after")
+    @classmethod
+    def _no_personal_information_itemnm(cls, value: str) -> str:
+        return _reject_personal_information(value)
+
+    @field_validator("value", mode="after")
+    @classmethod
+    def _blank_as_none(cls, value: str | None) -> str | None:
+        # 빈 문자열은 "값 없음"과 동일하게 취급한다.
+        if value is not None and value.strip() == "":
+            return None
+        return value
+
+    @field_validator("value", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str | None) -> str | None:
+        return _reject_personal_information(value)
+
+
+class SourceGroup(BaseModel):
+    name: str = Field(examples=["요고 69"], description="검증 대상 상품명")
+    items: list[SourceItem] = Field(min_length=1, description="검증 원문 항목 목록 (askValue 추출 대상)")
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str) -> str:
+        return _reject_personal_information(value)
+
+
+class VerificationTarget(BaseModel):
+    itemNm: str = Field(examples=["대상 고객"], description="검증 항목명")
+    desc: str | None = Field(default=None, description="검증 항목에 대한 설명")
+
+    @field_validator("itemNm", mode="after")
+    @classmethod
+    def _no_personal_information_itemnm(cls, value: str) -> str:
+        return _reject_personal_information(value)
+
+    @field_validator("desc", mode="after")
+    @classmethod
+    def _blank_as_none(cls, value: str | None) -> str | None:
+        if value is not None and value.strip() == "":
+            return None
+        return value
+
+    @field_validator("desc", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str | None) -> str | None:
+        return _reject_personal_information(value)
+
+
+class TermsAskVerificationRequest(ApiRequest):
+    termInfo: list[DocumentReference] = Field(min_length=1, description="검증에 쓰일 약관 문서 풀")
+    data: list[SourceGroup] = Field(min_length=1, description="검증 원문. 각 name마다 vrfItem 전체가 termInfo의 모든 문서와 교차 비교됨")
+    vrfItem: list[VerificationTarget] = Field(min_length=1, description="검증 항목 목록")
+    knwlgInfoId: int = Field(description="지식 정보 ID (콜백 본문에 받은 그대로 실려감)")
+    termVrfSeq: int = Field(description="약관 버전 순번 (콜백 본문에 받은 그대로 실려감)")
+    knwlgNm: str = Field(examples=["KT 요고 시리즈"], description="지식명 (콜백/리포트에 그대로 표시됨)")
+
+    @field_validator("knwlgNm", mode="after")
+    @classmethod
+    def _no_personal_information(cls, value: str) -> str:
+        return _reject_personal_information(value)
+
+
+class TermsAskItemResult(BaseModel):
+    itemNm: str = Field(description="검증 항목명 (vrfItem.itemNm)")
+    askValue: str | None = Field(default=None, description="검증 원문에서 찾은 값. 검증 원문에 해당 항목 자체가 없으면 null")
+    llmValue: str | None = Field(default=None, description="약관 원문에서 찾은 값. 약관에 해당 항목 자체가 없으면 null")
+    evidence: str | None = Field(default=None, description="약관 원문 인용 (자동 검증되지 않은 참고용). llmValue가 null이면 null")
+    page: int | None = Field(default=None, description="evidence가 위치한 페이지 번호 (자동 검증되지 않은 참고용)")
+    article: str | None = Field(
+        default=None, description="evidence가 위치한 약관 조항 번호, 예: '제3조', '제3조 2항' (자동 검증되지 않은 참고용)"
+    )
+    reason: str | None = Field(default=None, description="askValue와 llmValue의 차이 설명. 완전히 같으면 null")
+    matchRate: int | None = Field(
+        default=None, description="askValue와 llmValue의 의미적 일치율 (0~100). reason이 null이거나 llmValue가 null이면 null"
+    )
+    status: Literal["MATCHED", "PARTIAL_MATCH", "MISMATCH"]
+
+
+class TermsAskDocumentItemsResult(BaseModel):
+    ocrResltKey: str
+    termNm: str
+    aplyDate: str | None = None
+    nameMatchRate: int | None = Field(default=None, description="대상명과 이 문서 내 실제 표현의 의미적 일치율 (0~100)")
+    items: list[TermsAskItemResult]
+
+
+class TermsAskNameResult(BaseModel):
+    name: str
+    documents: list[TermsAskDocumentItemsResult]
+
+
+class TermsAskVerificationResult(BaseModel):
+    knwlgNm: str | None = None
+    data: list[TermsAskNameResult]
