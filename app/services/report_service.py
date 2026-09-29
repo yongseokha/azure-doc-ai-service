@@ -27,6 +27,8 @@ COLUMN_LABELS = {
     "itemNm": "지식 항목",
     "value": "상품 지식",
     "subClaim": "상품 지식 단위",
+    "askValue": "검증 원문 값",
+    "llmValue": "약관 기준 값",
     "evidence": "약관 내 해당 문구",
     "page": "약관 내 페이지",
     "article": "조항",
@@ -40,7 +42,7 @@ COLUMN_LABELS = {
     "overallResult": "종합 판정",
 }
 # 왼쪽+위 정렬(줄바꿈): 문장 길이가 제각각이라 여러 줄로 넘어갈 수 있는 컬럼들
-TOP_LEFT_COLUMNS = {"itemNm", "value", "subClaim", "evidence", "reason"}
+TOP_LEFT_COLUMNS = {"itemNm", "value", "subClaim", "askValue", "llmValue", "evidence", "reason"}
 # 중앙+수직중앙 정렬: 짧은 값(숫자/코드성 텍스트) 컬럼들
 CENTER_COLUMNS = {
     "page", "article", "matchRate", "nameMatchRate",
