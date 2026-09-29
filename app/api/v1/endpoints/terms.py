@@ -4,8 +4,13 @@ from fastapi import APIRouter, BackgroundTasks, Response
 
 from app.exceptions.handlers import DocumentNotFoundError, InvalidRequestError
 from app.schemas.base import ApiResponse
-from app.schemas.terms import TermsVerificationRequest
-from app.services import file_storage_service, terms_job_service, terms_verification_service
+from app.schemas.terms import TermsAskVerificationRequest, TermsVerificationRequest
+from app.services import (
+    file_storage_service,
+    terms_ask_verification_service,
+    terms_job_service,
+    terms_verification_service,
+)
 
 router = APIRouter(prefix="/terms", tags=["terms"])
 
@@ -97,6 +102,79 @@ async def resend_callback(rqtKey: str, background_tasks: BackgroundTasks) -> Api
         raise InvalidRequestError("완료된 job만 재전송할 수 있습니다.")
 
     background_tasks.add_task(terms_verification_service.resend_stored_result, job)
+
+    return ApiResponse[None](statusCode=200, statusMsg="재전송을 시작했습니다.", result=None)
+
+
+@router.post(
+    "/verify-ask",
+    response_model=ApiResponse[None],
+    summary="검증 원문 기반 약관 검증 요청 접수 (결과는 콜백으로 전달)",
+)
+async def verify_ask_terms(
+    request: TermsAskVerificationRequest,
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> ApiResponse[None]:
+    """
+    검증 원문(`data`)에서 검증 항목(`vrfItem`)에 해당하는 값(askValue)을 찾고,
+    약관 원문에서 찾은 값(llmValue)과 비교해 검증합니다.
+
+    - 각 상품(`data[].name`) × 검증 항목(`vrfItem[]`) 조합이 `termInfo`의 모든 문서와 교차 비교됩니다.
+    - 처리 방식(비동기 202, 콜백 전송, 중복 요청/재전송 처리)은 `/terms/verify`와 동일합니다.
+    """
+    job = await _ensure_rqt_key_not_used_by_other_type(request.rqtKey, terms_job_service.JOB_TYPE_VERIFY_ASK)
+
+    if job is not None and job["status"] == "processing" and not terms_job_service.is_stale(job["updated_at"]):
+        response.status_code = 202
+        return ApiResponse[None](statusCode=202, statusMsg="이미 처리 중입니다.", result=None)
+
+    if job is not None and job["status"] == "completed":
+        background_tasks.add_task(terms_ask_verification_service.resend_stored_result, job)
+        response.status_code = 202
+        return ApiResponse[None](
+            statusCode=202, statusMsg="이미 완료된 요청입니다. 저장된 결과를 다시 전송합니다.", result=None
+        )
+
+    await terms_job_service.claim_ask_job(request)
+    background_tasks.add_task(terms_ask_verification_service.process_and_callback, request)
+
+    response.status_code = 202
+    return ApiResponse[None](statusCode=202, statusMsg="약관 검증 요청을 접수했습니다.", result=None)
+
+
+@router.get(
+    "/verify-ask/{rqtKey}",
+    response_model=ApiResponse[dict],
+    summary="검증 원문 기반 약관 검증 job 상태/결과 조회",
+)
+async def get_ask_verification_status(rqtKey: str) -> ApiResponse[dict]:
+    job = await _get_job_of_type(rqtKey, terms_job_service.JOB_TYPE_VERIFY_ASK)
+    if job is None:
+        raise DocumentNotFoundError()
+
+    if job["status"] == "completed":
+        content = await file_storage_service.download_file(job["result_file_path"])
+        stored = json.loads(content)
+        summary = terms_ask_verification_service.build_stored_summary(job, stored)
+        return ApiResponse[dict](statusCode=200, statusMsg="OK", result=summary)
+
+    return ApiResponse[dict](statusCode=200, statusMsg="OK", result=_progress_result(job))
+
+
+@router.post(
+    "/verify-ask/{rqtKey}/resend-callback",
+    response_model=ApiResponse[None],
+    summary="검증 원문 기반 약관 검증: 완료된 job의 저장된 결과를 콜백으로 재전송 (재검증 없음)",
+)
+async def resend_ask_callback(rqtKey: str, background_tasks: BackgroundTasks) -> ApiResponse[None]:
+    job = await _get_job_of_type(rqtKey, terms_job_service.JOB_TYPE_VERIFY_ASK)
+    if job is None:
+        raise DocumentNotFoundError()
+    if job["status"] != "completed":
+        raise InvalidRequestError("완료된 job만 재전송할 수 있습니다.")
+
+    background_tasks.add_task(terms_ask_verification_service.resend_stored_result, job)
 
     return ApiResponse[None](statusCode=200, statusMsg="재전송을 시작했습니다.", result=None)
 
