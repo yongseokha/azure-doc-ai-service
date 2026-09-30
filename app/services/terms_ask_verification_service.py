@@ -144,9 +144,12 @@ ITEM_VERIFICATION_SCHEMA = {
 
 
 def _build_user_content(document_text: str, group: SourceGroup, target: VerificationTarget) -> list[dict]:
-    # 약관 원문을 항상 맨 앞 블록에 고정 배치하고 명시적 캐시 breakpoint를 걸어서, 같은
-    # 문서에 대한 반복 호출에서 Azure OpenAI의 prompt caching 효과를 안정적으로 받는다.
-    # 가변적인 [검증 원문]/[검증 대상] 부분은 별도 블록으로 분리해 캐시 경계 뒤에 둔다.
+    # 캐시는 앞에서부터 동일한 prefix 단위로 재사용되므로, 덜 자주 바뀌는 것부터 앞에 두고
+    # 블록마다 명시적 breakpoint를 건다.
+    # 1) 약관 원문: 같은 문서에 대한 모든 호출이 공유 (가장 크고 가장 재사용이 많음)
+    # 2) 검증 원문: 같은 (문서, 상품)에서 검증 항목만 다른 호출들이 공유
+    # 3) 검증 대상: 호출마다 달라서 캐시 경계 뒤에 둔다.
+    # 약관을 검증 원문보다 앞에 둬야 상품이 여러 개여도 약관 캐시가 깨지지 않는다.
     source_json = json.dumps(group.model_dump(), ensure_ascii=False, indent=2)
     return [
         {
@@ -156,8 +159,12 @@ def _build_user_content(document_text: str, group: SourceGroup, target: Verifica
         },
         {
             "type": "text",
+            "text": f"[검증 원문]\n{source_json}\n\n",
+            "prompt_cache_breakpoint": {"mode": "explicit"},
+        },
+        {
+            "type": "text",
             "text": (
-                f"[검증 원문]\n{source_json}\n\n"
                 f"[검증 대상]\n"
                 f"상품명: {group.name}\n"
                 f"항목명: {target.itemNm}\n"
