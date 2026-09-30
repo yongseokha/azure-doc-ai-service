@@ -168,7 +168,8 @@ async def claim_job(request: TermsVerificationRequest) -> None:
 
 
 async def claim_ask_job(request: TermsAskVerificationRequest) -> None:
-    """검증 원문 기반 약관 검증 job을 처리 상태로 (재)기록한다. item_count는 name × vrfItem 조합 수다."""
+    """검증 원문 기반 약관 검증 job을 처리 상태로 (재)기록한다.
+    item_count는 name × (문서별 vrfItem 수의 합), 즉 실제 검증(LLM 호출) 건수다."""
     now = _now_iso()
     await _merge_or_upload(
         {
@@ -181,7 +182,7 @@ async def claim_ask_job(request: TermsAskVerificationRequest) -> None:
             "progress_total": None,
             "document_count": len(request.termInfo),
             "names_count": len(request.data),
-            "item_count": len(request.data) * len(request.vrfItem),
+            "item_count": len(request.data) * sum(len(ref.vrfItem) for ref in request.termInfo),
             "knwlg_info_id": request.knwlgInfoId,
             "term_vrf_seq": request.termVrfSeq,
             "callback_status": "pending",

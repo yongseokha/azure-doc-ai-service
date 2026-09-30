@@ -232,19 +232,20 @@ def _assemble(
 
 async def _verify_all(request: TermsAskVerificationRequest) -> tuple[list[TermsAskNameResult], UsageSummary]:
     try:
-        # ocrResltKey 기준으로 중복 제거 - 같은 문서가 두 번 오면 LLM 호출도 두 번 실행되는 걸 막는다.
-        unique_refs = list({ref.ocrResltKey: ref for ref in request.termInfo}.values())
-        text_by_hash = await _load_documents(unique_refs)
+        # termInfo의 ocrResltKey 중복은 요청 스키마에서 이미 거부된다.
+        refs = request.termInfo
+        text_by_hash = await _load_documents(refs)
 
         semaphore = asyncio.Semaphore(settings.terms_verification_concurrency)
 
+        # 검증 항목은 문서마다 다르므로 각 문서의 vrfItem만 그 문서와 비교한다.
         # 문서를 바깥 루프에 둬서 같은 문서에 대한 호출들이 리스트상 서로 붙어있게 한다
         # (prompt 캐시 재사용 텀을 최대한 짧게 유지).
         calls = [
             (group, ref.ocrResltKey, target)
-            for ref in unique_refs
+            for ref in refs
             for group in request.data
-            for target in request.vrfItem
+            for target in ref.vrfItem
         ]
 
         total_calls = len(calls)
@@ -271,7 +272,7 @@ async def _verify_all(request: TermsAskVerificationRequest) -> tuple[list[TermsA
         outcomes = await _run_bounded(tasks)
 
         item_results, name_match_rates, metrics = zip(*outcomes) if outcomes else ((), (), ())
-        names_result = _assemble(unique_refs, calls, item_results, name_match_rates)
+        names_result = _assemble(refs, calls, item_results, name_match_rates)
         return names_result, _aggregate_usage(list(metrics))
     finally:
         # job이 끝나면(성공/실패 무관) 이 rqtKey의 rate limit 이력을 정리해서 메모리가 계속 쌓이지 않게 한다.

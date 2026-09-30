@@ -117,10 +117,11 @@ async def verify_ask_terms(
     response: Response,
 ) -> ApiResponse[None]:
     """
-    검증 원문(`data`)에서 검증 항목(`vrfItem`)에 해당하는 값(askValue)을 찾고,
+    검증 원문(`data`)에서 검증 항목(`termInfo[].vrfItem`)에 해당하는 값(askValue)을 찾고,
     약관 원문에서 찾은 값(llmValue)과 비교해 검증합니다.
 
-    - 각 상품(`data[].name`) × 검증 항목(`vrfItem[]`) 조합이 `termInfo`의 모든 문서와 교차 비교됩니다.
+    - 검증 항목은 문서마다 다릅니다. 각 문서(`termInfo[]`)마다 모든 상품(`data[].name`) × 그 문서의 `vrfItem[]` 조합을 비교합니다.
+    - `termInfo`에 같은 `ocrResltKey`가 중복되면 요청이 거부됩니다.
     - 처리 방식(비동기 202, 콜백 전송, 중복 요청/재전송 처리)은 `/terms/verify`와 동일합니다.
     """
     job = await _ensure_rqt_key_not_used_by_other_type(request.rqtKey, terms_job_service.JOB_TYPE_VERIFY_ASK)

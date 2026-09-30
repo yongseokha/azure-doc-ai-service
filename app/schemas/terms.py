@@ -180,10 +180,15 @@ class VerificationTarget(BaseModel):
         return _reject_personal_information(value)
 
 
+class AskDocumentReference(DocumentReference):
+    vrfItem: list[VerificationTarget] = Field(min_length=1, description="이 약관 문서로 검증할 항목 목록")
+
+
 class TermsAskVerificationRequest(ApiRequest):
-    termInfo: list[DocumentReference] = Field(min_length=1, description="검증에 쓰일 약관 문서 풀")
-    data: list[SourceGroup] = Field(min_length=1, description="검증 원문. 각 name마다 vrfItem 전체가 termInfo의 모든 문서와 교차 비교됨")
-    vrfItem: list[VerificationTarget] = Field(min_length=1, description="검증 항목 목록")
+    termInfo: list[AskDocumentReference] = Field(min_length=1, description="약관 문서와 문서별 검증 항목")
+    data: list[SourceGroup] = Field(
+        min_length=1, description="검증 원문. 각 name마다 termInfo 문서별로 그 문서의 vrfItem 전체가 비교됨"
+    )
     knwlgInfoId: int = Field(description="지식 정보 ID (콜백 본문에 받은 그대로 실려감)")
     termVrfSeq: int = Field(description="약관 버전 순번 (콜백 본문에 받은 그대로 실려감)")
     knwlgNm: str = Field(examples=["KT 요고 시리즈"], description="지식명 (콜백/리포트에 그대로 표시됨)")
@@ -192,6 +197,15 @@ class TermsAskVerificationRequest(ApiRequest):
     @classmethod
     def _no_personal_information(cls, value: str) -> str:
         return _reject_personal_information(value)
+
+    @field_validator("termInfo", mode="after")
+    @classmethod
+    def _no_duplicate_documents(cls, value: list[AskDocumentReference]) -> list[AskDocumentReference]:
+        # 문서마다 검증 항목이 달라서, 같은 문서가 두 번 오면 어느 쪽 vrfItem을 쓸지 정할 수 없다.
+        keys = [ref.ocrResltKey for ref in value]
+        if len(keys) != len(set(keys)):
+            raise ValueError("termInfo에 같은 ocrResltKey가 중복되어 있습니다. 문서당 한 번만 보내고 vrfItem을 합쳐주세요.")
+        return value
 
 
 class TermsAskItemResult(BaseModel):
